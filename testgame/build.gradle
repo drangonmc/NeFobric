@@ -1,0 +1,61 @@
+import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+
+// 一个模拟 Minecraft 1.20.1 启动流程的假游戏，只用于在拿不到原版文件的环境里测试 NeFobric。
+// 两个主类保留了 NeFobric 游戏钩子依赖的特征：客户端的 “Render thread”、服务端的 “server.properties”。
+sourceSets {
+    client
+    server
+    lib
+}
+
+dependencies {
+    serverCompileOnly sourceSets.lib.output
+}
+
+tasks.register('clientJar', Jar) {
+    archiveBaseName = 'fake-minecraft-client'
+    archiveVersion = '1.20.1'
+    from sourceSets.client.output
+}
+
+tasks.register('serverGameJar', Jar) {
+    archiveBaseName = 'fake-minecraft-server'
+    archiveVersion = '1.20.1'
+    from sourceSets.server.output
+}
+
+tasks.register('libJar', Jar) {
+    archiveBaseName = 'fake-library'
+    archiveVersion = '1.0'
+    from sourceSets.lib.output
+}
+
+// 按原版 bundler 格式打包：META-INF/versions.list、libraries.list（sha256 \t id \t 路径）
+tasks.register('bundlerJar') {
+    def serverJar = tasks.named('serverGameJar')
+    def libJar = tasks.named('libJar')
+    dependsOn serverJar, libJar
+    def out = layout.buildDirectory.file('libs/fake-server-bundler-1.20.1.jar')
+    outputs.file(out)
+    doLast {
+        def sha = { File f -> MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString() }
+        File game = serverJar.get().archiveFile.get().asFile
+        File lib = libJar.get().archiveFile.get().asFile
+        File target = out.get().asFile
+        target.parentFile.mkdirs()
+        new ZipOutputStream(new FileOutputStream(target)).withCloseable { zip ->
+            def put = { String name, byte[] data ->
+                zip.putNextEntry(new ZipEntry(name)); zip.write(data); zip.closeEntry()
+            }
+            put('META-INF/main-class', 'net.minecraft.server.Main'.bytes)
+            put('META-INF/versions.list', "${sha(game)}\t1.20.1\t1.20.1/server-1.20.1.jar\n".bytes)
+            put('META-INF/libraries.list', "${sha(lib)}\torg.example:fake-library:1.0\torg/example/fake-library/1.0/fake-library-1.0.jar\n".bytes)
+            put('META-INF/versions/1.20.1/server-1.20.1.jar', game.bytes)
+            put('META-INF/libraries/org/example/fake-library/1.0/fake-library-1.0.jar', lib.bytes)
+        }
+    }
+}
+
+assemble.dependsOn 'clientJar', 'bundlerJar'

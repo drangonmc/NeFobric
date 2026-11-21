@@ -1,0 +1,46 @@
+plugins {
+    id 'com.gradleup.shadow' version '8.3.8' apply false
+}
+
+allprojects {
+    group = 'dev.nefobric'
+    version = project.property('nefobric_version')
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    tasks.withType(JavaCompile).configureEach {
+        // Minecraft 1.20.1 运行在 Java 17 上
+        options.release = 17
+        options.encoding = 'UTF-8'
+    }
+
+    tasks.withType(ProcessResources).configureEach {
+        filteringCharset = 'UTF-8'
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        systemProperty 'nefobric.lang', 'en'
+        testLogging {
+            events 'failed'
+            exceptionFormat 'full'
+        }
+    }
+
+    tasks.withType(AbstractArchiveTask).configureEach {
+        preserveFileTimestamps = false
+        reproducibleFileOrder = true
+    }
+
+    dependencies {
+        testImplementation platform("org.junit:junit-bom:${junit_version}")
+        testImplementation 'org.junit.jupiter:junit-jupiter'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+}

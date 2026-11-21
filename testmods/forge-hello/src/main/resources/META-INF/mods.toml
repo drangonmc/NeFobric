@@ -1,0 +1,25 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="forge_hello"
+version="${file.jarVersion}"
+displayName="Forge Hello"
+description='''
+NeFobric V0.0.1 Alpha 的 Forge 测试模组。
+'''
+
+[[dependencies.forge_hello]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.forge_hello]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"

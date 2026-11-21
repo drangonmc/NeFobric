@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "fabric_hello",
+  "version": "${version}",
+  "name": "Fabric Hello",
+  "description": "NeFobric V0.0.1 Alpha 的 Fabric 测试模组。",
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "preLaunch": ["dev.nefobric.testmods.fabric.FabricHello"],
+    "main": ["dev.nefobric.testmods.fabric.FabricHello"],
+    "client": ["dev.nefobric.testmods.fabric.FabricHello"],
+    "server": ["dev.nefobric.testmods.fabric.FabricHello"]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.21",
+    "minecraft": "~1.20.1",
+    "java": ">=17"
+  }
+}

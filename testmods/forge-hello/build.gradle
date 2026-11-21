@@ -1,0 +1,14 @@
+// 最简单的 Forge 测试模组：只有一个 @Mod 主类，构造时打印日志。
+// 它同样可以直接放进真正的 Forge 1.20.1 里运行。
+version = '1.0.0'
+
+dependencies {
+    compileOnly project(':compat-forge')
+}
+
+jar {
+    archiveBaseName = 'forge-hello'
+    manifest {
+        attributes('Implementation-Version': project.version)
+    }
+}

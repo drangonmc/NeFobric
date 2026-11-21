@@ -1,0 +1,66 @@
+import org.apache.tools.ant.filters.ReplaceTokens
+
+plugins {
+    id 'com.gradleup.shadow'
+}
+
+dependencies {
+    implementation project(':loader')
+    implementation project(':compat-fabric')
+    implementation project(':compat-forge')
+}
+
+jar {
+    enabled = false
+}
+
+// 发布用的单一 jar：客户端（启动器版本文件里的 library）和专用服务端（java -jar）共用。
+// 依赖库全部重定位到 dev.nefobric.shadow，避免和游戏自带的 gson 等库冲突。
+shadowJar {
+    archiveBaseName = 'nefobric-loader'
+    archiveClassifier = ''
+    relocate 'org.objectweb.asm', 'dev.nefobric.shadow.asm'
+    relocate 'com.google.gson', 'dev.nefobric.shadow.gson'
+    relocate 'com.electronwill.nightconfig', 'dev.nefobric.shadow.nightconfig'
+    mergeServiceFiles()
+    exclude 'module-info.class'
+    exclude 'META-INF/versions/*/module-info.class'
+    exclude 'META-INF/maven/**'
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    exclude 'META-INF/LICENSE*', 'META-INF/NOTICE*'
+    manifest {
+        attributes(
+                'Main-Class': 'dev.nefobric.loader.launch.ServerMain',
+                'Implementation-Title': 'NeFobric',
+                'Implementation-Version': project.version,
+                'Implementation-Vendor': 'NeFobric'
+        )
+    }
+}
+
+assemble.dependsOn shadowJar
+
+def mcVersion = project.property('minecraft_version')
+def versionId = "nefobric-${project.version}-${mcVersion}"
+
+// 发布包：加载器 jar、客户端版本文件、安装脚本、三个测试模组
+tasks.register('packageRelease', Zip) {
+    group = 'distribution'
+    description = 'Builds build/distributions/nefobric-<version>.zip'
+    dependsOn shadowJar
+    archiveFileName = "nefobric-${project.version}.zip"
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    into("nefobric-${project.version}") {
+        from(shadowJar)
+        from('src/release') {
+            filteringCharset = 'UTF-8'
+            filter(ReplaceTokens, tokens: [VERSION: project.version.toString(), MC: mcVersion.toString(), VERSION_ID: versionId.toString()])
+            rename 'version.json', "${versionId}.json"
+        }
+        into('test-mods') {
+            from(project(':testmods:fabric-hello').tasks.named('jar'))
+            from(project(':testmods:forge-hello').tasks.named('jar'))
+            from(project(':testmods:neoforge-hello').tasks.named('jar'))
+        }
+    }
+}

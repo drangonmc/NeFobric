@@ -1,0 +1,8 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    implementation project(':loader')
+    implementation "com.electronwill.night-config:toml:${nightconfig_version}"
+}

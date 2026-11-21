@@ -1,0 +1,17 @@
+{
+  "id": "@VERSION_ID@",
+  "inheritsFrom": "@MC@",
+  "releaseTime": "2026-11-21T00:00:00+00:00",
+  "time": "2026-11-21T00:00:00+00:00",
+  "type": "release",
+  "mainClass": "dev.nefobric.loader.launch.ClientMain",
+  "arguments": {
+    "game": [],
+    "jvm": []
+  },
+  "libraries": [
+    {
+      "name": "dev.nefobric:nefobric-loader:@VERSION@"
+    }
+  ]
+}

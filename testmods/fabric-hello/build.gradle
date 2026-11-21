@@ -1,0 +1,18 @@
+// 最简单的 Fabric 测试模组：用到 preLaunch / main / client / server 四个入口和 FabricLoader。
+// 它只依赖 Fabric Loader 的公开 API，同样可以直接放进真正的 Fabric 1.20.1 里运行。
+version = '1.0.0'
+
+dependencies {
+    compileOnly project(':compat-fabric')
+}
+
+processResources {
+    inputs.property 'version', version
+    filesMatching('fabric.mod.json') {
+        expand version: version
+    }
+}
+
+jar {
+    archiveBaseName = 'fabric-hello'
+}

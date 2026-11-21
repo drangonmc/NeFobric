@@ -1,0 +1,25 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="neoforge_hello"
+version="${file.jarVersion}"
+displayName="NeoForge Hello"
+description='''
+NeFobric V0.0.1 Alpha 的 NeoForge 测试模组。
+'''
+
+[[dependencies.neoforge_hello]]
+    modId="neoforge"
+    mandatory=true
+    versionRange="[47.1,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.neoforge_hello]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"

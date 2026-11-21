@@ -1,0 +1,16 @@
+rootProject.name = 'nefobric'
+
+// 核心：启动、类加载、模组发现、依赖解析、游戏钩子
+include 'loader'
+// 兼容层：Fabric 与 Forge 系（Forge 47 / NeoForge 47.1 共用）
+include 'compat-fabric'
+include 'compat-forge'
+// 发布用的单一 jar（客户端与专用服务端共用）
+include 'dist'
+
+// 测试用：模拟 1.20.1 启动流程的假游戏、三个最简单的测试模组、端到端测试
+include 'testgame'
+include 'testmods:fabric-hello'
+include 'testmods:forge-hello'
+include 'testmods:neoforge-hello'
+include 'integration-test'

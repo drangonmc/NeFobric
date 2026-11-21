@@ -1,0 +1,22 @@
+// 端到端测试：用发布 jar + 模拟游戏 + 三个测试模组，真的启动一个子进程走完整条链路。
+def itInputs = [
+        loaderJar      : ':dist:shadowJar',
+        fakeClientJar  : ':testgame:clientJar',
+        fakeServerJar  : ':testgame:bundlerJar',
+        fabricHelloJar : ':testmods:fabric-hello:jar',
+        forgeHelloJar  : ':testmods:forge-hello:jar',
+        neoforgeHelloJar: ':testmods:neoforge-hello:jar',
+]
+
+test {
+    itInputs.each { key, path -> dependsOn path }
+    doFirst {
+        itInputs.each { key, path ->
+            def task = project.tasks.getByPath(path)
+            def file = task.hasProperty('archiveFile') ? task.archiveFile.get().asFile : task.outputs.files.singleFile
+            systemProperty "nefobric.it.${key}", file.absolutePath
+        }
+    }
+    // 子进程启动较慢，串行运行更稳定
+    maxParallelForks = 1
+}
