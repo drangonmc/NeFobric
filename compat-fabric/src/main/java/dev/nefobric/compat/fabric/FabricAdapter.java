@@ -17,6 +17,8 @@ import dev.nefobric.loader.metadata.ModMetadataException;
 import dev.nefobric.loader.spi.EcosystemAdapter;
 import dev.nefobric.loader.spi.LoadStage;
 import dev.nefobric.loader.spi.ModLoadingException;
+import dev.nefobric.loader.transform.TransformerPhase;
+import dev.nefobric.loader.transform.TransformerRegistry;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.api.EnvType;
@@ -134,12 +136,14 @@ public final class FabricAdapter implements EcosystemAdapter {
     }
 
     /** 当前端要加载的 Mixin 配置（fabric.mod.json 的 mixins 可以按 environment 限定端）。 */
+    @Override
     public List<String> mixinConfigs(ModCandidate mod, Env env) {
         FabricModMetadata meta = FabricMetadataParser.metadata(mod);
         return meta == null ? mod.mixinConfigs() : meta.mixinConfigs(env == Env.CLIENT ? EnvType.CLIENT : EnvType.SERVER);
     }
 
     /** Mixin 注册配置时由核心回调：记下所属模组和按依赖算出的兼容等级。 */
+    @Override
     public void decorateMixinConfig(ModCandidate mod, String resource, IMixinConfig config) {
         FabricModMetadata meta = FabricMetadataParser.metadata(mod);
         if (meta == null) {
@@ -150,23 +154,38 @@ public final class FabricAdapter implements EcosystemAdapter {
     }
 
     /**
-     * 挂在类变换流水线 ACCESS 阶段的变换器：与 Fabric Loader 的 {@code loadAccessWideners} 一样，读所有 Fabric 模组
-     * （含 Jar-in-Jar 解出来的）在 fabric.mod.json 里声明的 access widener，合并后应用到游戏类。没有任何条目时返回空。
+     * 与 Fabric Loader 的 {@code FabricTransformer} 一样：STRIP 阶段剥离 {@code @Environment}，ACCESS 阶段应用所有
+     * Fabric 模组的 access widener。没有 Fabric 模组时什么都不挂。
      */
-    public Optional<AccessWidenerApplier> accessWidenerApplier() {
+    @Override
+    public void registerTransformers(TransformerRegistry registry, NeFobricLoader loader, List<ModCandidate> mods) {
+        if (mods.isEmpty()) {
+            return;
+        }
+        registry.add(TransformerPhase.STRIP, environmentStripper(loader.env()));
+        accessWidenerApplier(mods).ifPresent(aw -> registry.add(TransformerPhase.ACCESS, aw));
+    }
+
+    /**
+     * ACCESS 阶段的变换器：与 Fabric Loader 的 {@code loadAccessWideners} 一样，读每个 Fabric 模组（含 Jar-in-Jar
+     * 解出来的）在 fabric.mod.json 里声明的 access widener，合并后应用到游戏类。没有任何条目时返回空。
+     *
+     * @param mods 属于 Fabric 层的模组，按加载顺序
+     */
+    public Optional<AccessWidenerApplier> accessWidenerApplier(List<ModCandidate> mods) {
         AccessWidenerApplier.Builder builder = AccessWidenerApplier.builder();
-        for (ModContainerImpl container : FabricLoaderImpl.INSTANCE.containers()) {
-            FabricModMetadata meta = FabricMetadataParser.metadata(container.candidate());
+        for (ModCandidate mod : mods) {
+            FabricModMetadata meta = FabricMetadataParser.metadata(mod);
             if (meta == null || meta.accessWidener() == null) {
                 continue;
             }
-            String id = container.getMetadata().getId();
+            ModContainerImpl container = FabricLoaderImpl.INSTANCE.container(mod);
             Path path = container.findPath(meta.accessWidener()).orElseThrow(() -> new RuntimeException(
-                    String.format("Missing accessWidener file %s from mod %s", meta.accessWidener(), id)));
+                    String.format("Missing accessWidener file %s from mod %s", meta.accessWidener(), mod.id())));
             try {
                 builder.add(AccessWidenerReader.read(Files.readString(path, StandardCharsets.UTF_8)));
             } catch (Exception e) {
-                throw new RuntimeException("Failed to read accessWidener file from mod " + id, e);
+                throw new RuntimeException("Failed to read accessWidener file from mod " + mod.id(), e);
             }
         }
         AccessWidenerApplier applier = builder.build();

@@ -57,6 +57,19 @@ public final class ApiProbe {
         return p.failures.isEmpty() ? "OK (" + p.checks + " checks)" : "FAIL " + p.failures;
     }
 
+    private static boolean hasMethod(Class<?> c, String name) {
+        return Arrays.stream(c.getDeclaredMethods()).anyMatch(m -> m.getName().equals(name));
+    }
+
+    private static boolean causeMentions(Throwable t, String text) {
+        for (; t != null; t = t.getCause()) {
+            if (t.getMessage() != null && t.getMessage().contains(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void probe() throws Exception {
         FabricLoader loader = FabricLoader.getInstance();
         EnvType env = loader.getEnvironmentType();
@@ -116,8 +129,38 @@ public final class ApiProbe {
                 .getTargetClassLoader() == ApiProbe.class.getClassLoader());
         check("launcher namespace", net.fabricmc.loader.impl.launch.FabricLauncherBase.getLauncher()
                 .getTargetNamespace().equals(mr.getCurrentRuntimeNamespace()));
+        check("launcher isClassLoaded", net.fabricmc.loader.impl.launch.FabricLauncherBase.getLauncher()
+                .isClassLoaded(ApiProbe.class.getName()));
+        byte[] raw = net.fabricmc.loader.impl.launch.FabricLauncherBase.getLauncher()
+                .getClassByteArray(ApiProbe.class.getName(), false);
+        check("launcher class bytes", raw != null && raw.length > 4 && (raw[0] & 0xff) == 0xCA && (raw[1] & 0xff) == 0xFE);
 
-        // @Environment 剥离的检查等核心的 TransformerRegistry 合并、剥离变换器挂上之后再加回来
+        // @Environment 剥离：另一端的方法被去掉；服务端加载整个只属于客户端的类会失败
+        boolean hasClient = hasMethod(EnvProbe.class, "clientOnly");
+        boolean hasServer = hasMethod(EnvProbe.class, "serverOnly");
+        check("@Environment method strip", env == EnvType.CLIENT ? hasClient && !hasServer : hasServer && !hasClient);
+        ClassLoader cl = ApiProbe.class.getClassLoader();
+        if (env == EnvType.SERVER) {
+            Throwable error = null;
+            try {
+                Class.forName("dev.nefobric.testmods.fabric.ClientOnlyProbe", false, cl);
+            } catch (Throwable t) {
+                error = t;
+            }
+            check("@Environment class strip", causeMentions(error, "Cannot load class dev.nefobric.testmods.fabric.ClientOnlyProbe"));
+        }
+
+        // access widener：模拟游戏里的私有方法被改成 public（在真正的游戏里没有这个类，跳过）
+        String gameClass = env == EnvType.CLIENT ? "net.minecraft.client.FakeMinecraft" : "net.minecraft.server.Main";
+        Class<?> game = null;
+        try {
+            game = Class.forName(gameClass, false, cl);
+        } catch (ClassNotFoundException e) {
+            // 真正的游戏
+        }
+        if (game != null && hasMethod(game, "awProbe")) {
+            check("access widener", java.lang.reflect.Modifier.isPublic(game.getDeclaredMethod("awProbe").getModifiers()));
+        }
     }
 
 }

@@ -1,0 +1,4 @@
+accessWidener v2 intermediary
+# 模拟游戏里的私有方法；在真正的 1.20.1 里这两个类不存在，Fabric Loader 和 NeFobric 都会忽略
+accessible method net/minecraft/client/FakeMinecraft awProbe ()Ljava/lang/String;
+accessible method net/minecraft/server/Main awProbe ()Ljava/lang/String;

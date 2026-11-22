@@ -5,9 +5,7 @@ plugins {
 dependencies {
     implementation project(':loader')
     implementation "com.google.code.gson:gson:${gson_version}"
-    // Fabric 的 Mixin 分支（Fabric Loader 0.16.10 自带的版本）：只在编译时需要，运行时由核心打包同一版本
-    compileOnly "net.fabricmc:sponge-mixin:0.15.4+mixin.0.8.7"
-    testImplementation "net.fabricmc:sponge-mixin:0.15.4+mixin.0.8.7"
+    // Fabric 的 Mixin 分支和 MixinExtras 由核心自带，经 loader 的 api 依赖传过来
 }
 
 // API 覆盖检查工具（不进发布包）：
