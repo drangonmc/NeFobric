@@ -14,19 +14,22 @@ import dev.nefobric.loader.util.Messages;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
 /**
- * Forge 系兼容层（1.20.1 上 Forge 47 与 NeoForge 47.1 共用）：读 mods.toml，扫描 {@code @Mod} 主类，
- * 在游戏钩子触发时构造主类。Forge 的事件总线、注册表、配置等 API 留到路线图的阶段 2。
+ * Forge 系兼容层（1.20.1 上 Forge 47 与 NeoForge 47.1 共用）：读 mods.toml，扫描 {@code @Mod} 主类。
+ *
+ * <p>Forge 的 API（事件总线、FML 加载流程、配置……）由 NeFobric 自己重写，放在内嵌的 forge-runtime.jar 里
+ * （见 compat-forge/build.gradle）。它引用原版类，所以由游戏类加载器加载：启动时解压到缓存目录交给核心，
+ * 游戏钩子触发时通过反射调用 {@code dev.nefobric.forge.fml.ForgeRuntime} 跑 Forge 的加载状态机。</p>
  */
 public final class ForgeAdapter implements EcosystemAdapter {
     /** 对外声明的版本号，只为通过模组的依赖检查，不代表已经实现了对应版本的 API。 */
@@ -35,7 +38,12 @@ public final class ForgeAdapter implements EcosystemAdapter {
     /** mods.toml 里 loaderVersion 对照的 FML 语言加载器版本。 */
     public static final String FML_LANGUAGE_VERSION = "47";
 
-    private final Map<String, Object> modInstances = Collections.synchronizedMap(new LinkedHashMap<>());
+    /** 内嵌运行库的清单，每行一个相对 META-INF/nefobric/ 的路径。 */
+    static final String RUNTIME_LIST = "META-INF/nefobric/forge-runtime.list";
+    static final String RUNTIME_ENTRY_CLASS = "dev.nefobric.forge.fml.ForgeRuntime";
+
+    /** 读到过 Forge 系模组才加载 Forge 运行时：否则 Fabric 模组按类名探测 Forge 时会误以为在 Forge 上。 */
+    private volatile boolean sawForgeMods;
 
     @Override
     public String displayName() {
@@ -74,6 +82,7 @@ public final class ForgeAdapter implements EcosystemAdapter {
                     manifestMixins, jar.has("META-INF/accesstransformer.cfg"),
                     jar.has("META-INF/jarjar/metadata.json"));
             List<ModCandidate> mods = ModsTomlParser.parse(toml, info);
+            sawForgeMods |= !mods.isEmpty();
             if (modClasses.isEmpty() && !scan.neoModClasses().isEmpty()) {
                 // 只有 net.neoforged 的 @Mod：NeoForge 20.2 以后的模组，在 1.20.1 上一构造就会缺类
                 throw ModMetadataException.skip(Messages.tr("forge.modernNeoForgeAnnotation",
@@ -105,7 +114,17 @@ public final class ForgeAdapter implements EcosystemAdapter {
 
     @Override
     public Collection<String> loaderOwnedClasses() {
-        return List.of("net.minecraftforge.fml.common.Mod");
+        // Forge API 由游戏类加载器从 forge-runtime.jar 加载，不归父加载器
+        return List.of();
+    }
+
+    @Override
+    public List<Path> runtimeLibraries(GameInstall game, Path cacheDir) throws IOException {
+        if (!sawForgeMods) {
+            return List.of();
+        }
+        return RuntimeExtractor.extract(ForgeAdapter.class.getClassLoader(), RUNTIME_LIST,
+                cacheDir.resolve("forge-runtime"));
     }
 
     @Override
@@ -140,32 +159,35 @@ public final class ForgeAdapter implements EcosystemAdapter {
 
     @Override
     public void runStage(LoadStage stage, NeFobricLoader loader, List<ModCandidate> mods) throws ModLoadingException {
-        if (stage != LoadStage.CONSTRUCT) {
-            return;
-        }
-        for (ModCandidate mod : mods) {
-            String className = mod.extra(ModsTomlParser.EXTRA_MOD_CLASS, String.class);
-            if (className == null) {
-                continue;
-            }
-            Log.debug("Constructing @Mod " + className + " for " + mod.id());
-            try {
-                Class<?> c = Class.forName(className, true, loader.classLoader());
-                modInstances.put(mod.id(), c.getDeclaredConstructor().newInstance());
-            } catch (InvocationTargetException e) {
-                throw new ModLoadingException(mod, "@Mod " + className, e.getCause() != null ? e.getCause() : e);
-            } catch (ExceptionInInitializerError e) {
-                throw new ModLoadingException(mod, "@Mod " + className, e.getCause() != null ? e.getCause() : e);
-            } catch (Throwable t) {
-                throw new ModLoadingException(mod, "@Mod " + className, t);
+        switch (stage) {
+            // 和 Forge 一样：游戏钩子里构造模组、跑注册表（GATHER）
+            case CONSTRUCT -> callRuntime(loader, mods, "gather");
+            // 没有原版钩子接管时（例如测试用的假游戏）把 setup 和加载完成也跑完
+            case SIDE -> callRuntime(loader, mods, "runRemainingIfNoGameHooks");
+            default -> {
             }
         }
     }
 
-    /** 已构造的模组主类实例，之后的 ModList / ModContainer 会用到。 */
-    public Map<String, Object> modInstances() {
-        synchronized (modInstances) {
-            return Map.copyOf(modInstances);
+    private static void callRuntime(NeFobricLoader loader, List<ModCandidate> mods, String method)
+            throws ModLoadingException {
+        Method m;
+        try {
+            Class<?> runtime = Class.forName(RUNTIME_ENTRY_CLASS, true, loader.classLoader());
+            m = runtime.getMethod(method);
+        } catch (ReflectiveOperationException | LinkageError e) {
+            throw new ModLoadingException(mods.get(0), Messages.tr("forge.runtimeMissing"), e);
+        }
+        try {
+            m.invoke(null);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof ModLoadingException mle) {
+                throw mle;
+            }
+            throw new ModLoadingException(mods.get(0), "Forge " + method, cause);
+        } catch (IllegalAccessException e) {
+            throw new ModLoadingException(mods.get(0), "Forge " + method, e);
         }
     }
 }

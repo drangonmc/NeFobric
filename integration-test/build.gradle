@@ -3,6 +3,7 @@ def itInputs = [
         loaderJar      : ':dist:shadowJar',
         fakeClientJar  : ':testgame:clientJar',
         fakeServerJar  : ':testgame:bundlerJar',
+        fakeClientLibs : ':testgame:clientLibs',
         fabricHelloJar : ':testmods:fabric-hello:jar',
         forgeHelloJar  : ':testmods:forge-hello:jar',
         neoforgeHelloJar: ':testmods:neoforge-hello:jar',

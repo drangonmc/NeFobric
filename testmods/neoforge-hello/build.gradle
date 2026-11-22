@@ -3,7 +3,8 @@
 version = '1.0.0'
 
 dependencies {
-    compileOnly project(':compat-forge')
+    // Forge API：编译时用 NeFobric 自己重写的版本（和 Forge 的类名、签名一致），模组 jar 里不带这些类
+    compileOnly project(path: ':compat-forge', configuration: 'forgeApiElements')
 }
 
 jar {
