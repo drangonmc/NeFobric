@@ -87,6 +87,8 @@ class LaunchIT {
                 // forge-hello 的 access transformer 把模拟游戏的私有方法改成了 public；@OnlyIn(CLIENT) 的方法只在客户端保留
                 "[forge_hello] access transformer: atProbe is public",
                 "[forge_hello] @OnlyIn: clientOnly " + (client ? "present" : "stripped"),
+                // @AutoRegisterCapability 的接口在构造之后、setup 之前注册（Forge 的 INJECT_CAPABILITIES 状态）
+                "[forge_hello] capability registered: dev/nefobric/testmods/forge/HelloCapability, greet=hi",
                 "[forge_hello] common setup: Hello from the config x3, mods=4, forge=true",
                 "[forge_hello] enqueued work ran",
                 "[forge_hello] load complete");
@@ -159,6 +161,10 @@ class LaunchIT {
         assertTrue(r.output().contains("Skipped quilt-thing.jar: Quilt mods are not supported yet."), r.output());
         assertTrue(r.output().contains("Skipped some-library.jar: not a Fabric, Forge or NeoForge mod."), r.output());
         assertTrue(Files.isRegularFile(gameDir.resolve("logs/nefobric-latest.log")));
+        // Forge 自己的客户端和通用配置由内置的 forge 模组写出
+        assertTrue(Files.isRegularFile(gameDir.resolve("config/forge-client.toml")));
+        assertTrue(Files.isRegularFile(gameDir.resolve("config/forge-common.toml")));
+        assertTrue(Files.isRegularFile(gameDir.resolve("config/forge_hello-common.toml")));
     }
 
     @Test
@@ -189,6 +195,8 @@ class LaunchIT {
         assertFalse(r.output().contains("FakeMinecraft"), "client mixins must not apply on the server: " + r.output());
         assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(Files.isRegularFile(serverDir.resolve("versions/1.20.1/server-1.20.1.jar")));
+        assertTrue(Files.isRegularFile(serverDir.resolve("config/forge-common.toml")));
+        assertFalse(Files.exists(serverDir.resolve("config/forge-client.toml")), "client config is client only");
         assertTrue(Files.isRegularFile(serverDir.resolve("libraries/org/example/fake-library/1.0/fake-library-1.0.jar")));
 
         // 第二次启动：文件已解出且校验和相符，不再重复解压

@@ -3,6 +3,10 @@ package dev.nefobric.testmods.forge;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.CapabilityManager;
+import net.minecraftforge.common.capabilities.CapabilityToken;
+import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
@@ -30,6 +34,8 @@ public class ForgeHello {
             .define("greeting", "Hello from the config");
     private static final ForgeConfigSpec.IntValue COUNT = BUILDER.defineInRange("count", 3, 1, 10);
     private static final ForgeConfigSpec SPEC = BUILDER.build();
+    private static final Capability<HelloCapability> HELLO = CapabilityManager.get(new CapabilityToken<>() {
+    });
 
     @SuppressWarnings("removal") // 1.20.1 的模组都这样拿上下文；Forge 只是预告了 1.21.1 会移除
     public ForgeHello() {
@@ -40,6 +46,11 @@ public class ForgeHello {
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC);
         probeTransformers();
+        HELLO.addListener(cap -> {
+            LazyOptional<HelloCapability> impl = LazyOptional.of(() -> () -> "hi");
+            System.out.println("[forge_hello] capability registered: " + cap.getName() + ", greet="
+                    + cap.orEmpty(HELLO, impl).map(HelloCapability::greet).orElse("none"));
+        });
     }
 
     /** 检查 access transformer 和 @OnlyIn 剥离：在真正的 Forge 里没有模拟游戏的类，只检查 @OnlyIn。 */

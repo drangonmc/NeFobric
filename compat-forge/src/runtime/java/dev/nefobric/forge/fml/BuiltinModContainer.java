@@ -1,5 +1,7 @@
 package dev.nefobric.forge.fml;
 
+import net.minecraftforge.common.ForgeConfig;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.eventbus.api.BusBuilder;
 import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -31,6 +33,13 @@ public final class BuiltinModContainer extends ModContainer {
                 .markerType(IModBusEvent.class).build();
         this.contextExtension = () -> null;
         this.configHandler = Optional.of(ce -> eventBus.post(ce.self()));
+        if ("forge".equals(info.getModId())) {
+            // 和 ForgeMod 的构造函数一样：注册 Forge 自己的三份配置
+            addConfig(new ModConfig(ModConfig.Type.CLIENT, ForgeConfig.clientSpec(), this));
+            addConfig(new ModConfig(ModConfig.Type.SERVER, ForgeConfig.serverSpec(), this));
+            addConfig(new ModConfig(ModConfig.Type.COMMON, ForgeConfig.commonSpec(), this));
+            eventBus.register(ForgeConfig.class);
+        }
     }
 
     public IEventBus getEventBus() {

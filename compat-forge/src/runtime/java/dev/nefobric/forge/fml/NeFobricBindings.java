@@ -1,5 +1,6 @@
 package dev.nefobric.forge.fml;
 
+import net.minecraftforge.common.util.MavenVersionStringHelper;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.I18NParser;
@@ -88,7 +89,8 @@ public final class NeFobricBindings implements IBindingsProvider {
                     }
                     return String.valueOf(arg);
                 case "vr":
-                    return arg instanceof VersionRange vr ? vr.toString() : String.valueOf(arg);
+                    return arg instanceof VersionRange vr ? MavenVersionStringHelper.versionRangeToString(vr)
+                            : String.valueOf(arg);
                 case "i18n":
                     return arg == null ? String.valueOf(param) : String.valueOf(arg);
                 default:
