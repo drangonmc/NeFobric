@@ -36,10 +36,15 @@ public final class NeFobricClassLoader extends URLClassLoader {
         ClassLoader.registerAsParallelCapable();
     }
 
-    /** 加载器自己的包（含重定位后的依赖库）。注意不是整个 dev.nefobric，NeFobric 的测试模组也在这个命名空间下。 */
+    /**
+     * 加载器自己的包（含重定位后的依赖库）。注意不是整个 dev.nefobric，NeFobric 的测试模组也在这个命名空间下。
+     * ASM、Mixin 和 MixinExtras 也由加载器统一提供：Mixin 的公开接口直接用 ASM 的类型，模组自带（JiJ）的
+     * MixinExtras 如果被子优先加载出第二份就会和加载器初始化的那份对不上。
+     */
     private static final List<String> ALWAYS_PARENT = List.of(
             "java.", "javax.", "jdk.", "sun.", "com.sun.",
-            "dev.nefobric.loader.", "dev.nefobric.compat.", "dev.nefobric.shadow.");
+            "dev.nefobric.loader.", "dev.nefobric.compat.", "dev.nefobric.shadow.",
+            "org.objectweb.asm.", "org.spongepowered.", "com.llamalad7.mixinextras.");
 
     private final List<String> parentPackages = new CopyOnWriteArrayList<>();
     private final List<String> parentClasses = new CopyOnWriteArrayList<>();
