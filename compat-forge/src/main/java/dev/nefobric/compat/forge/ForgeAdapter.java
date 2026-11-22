@@ -2,8 +2,10 @@ package dev.nefobric.compat.forge;
 
 import dev.nefobric.compat.forge.transform.AccessTransformerApplier;
 import dev.nefobric.compat.forge.transform.AccessTransformers;
+import dev.nefobric.compat.forge.transform.ActiveAccessTransformers;
 import dev.nefobric.compat.forge.transform.EnumExtender;
 import dev.nefobric.compat.forge.transform.ExtensibleVanillaEnums;
+import dev.nefobric.compat.forge.transform.LaunchPluginBridge;
 import dev.nefobric.compat.forge.transform.OnlyInStripper;
 import dev.nefobric.loader.Env;
 import dev.nefobric.loader.discovery.ModJar;
@@ -30,7 +32,6 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
@@ -155,7 +156,8 @@ public final class ForgeAdapter implements EcosystemAdapter {
 
     /**
      * STRIP 阶段按端去掉 {@code @OnlyIn}，ACCESS 阶段应用所有 Forge 系模组（含 Jar-in-Jar 里的）的访问变换。
-     * 和 Forge 一样对游戏和模组的类都生效。
+     * 和 Forge 一样对游戏和模组的类都生效。没有模组带 AT 文件时也挂上，运行中还可以追加
+     * （{@code FMLLoader.addAccessTransformer}）。
      */
     @Override
     public void registerTransformers(TransformerRegistry registry, NeFobricLoader loader, List<ModCandidate> mods) {
@@ -164,39 +166,42 @@ public final class ForgeAdapter implements EcosystemAdapter {
         }
         registry.add(TransformerPhase.GAME_PATCH, new ExtensibleVanillaEnums());
         registry.add(TransformerPhase.STRIP, new OnlyInStripper(loader.env() == Env.CLIENT ? "CLIENT" : "DEDICATED_SERVER"));
-        accessTransformers(mods).ifPresent(at -> registry.add(TransformerPhase.ACCESS, new AccessTransformerApplier(at)));
-        // 和 Forge 一样，枚举扩展看到的是 AT 改过的类
+        List<ActiveAccessTransformers.Source> sources = accessTransformerSources(mods);
+        AccessTransformerApplier applier = new AccessTransformerApplier(ActiveAccessTransformers.build(sources));
+        ActiveAccessTransformers.install(sources, applier);
+        registry.add(TransformerPhase.ACCESS, applier);
+        // 和 Forge 一样，枚举扩展看到的是 AT 改过的类（accesstransformer → runtime_enum_extender → 模组的启动插件）
         registry.add(TransformerPhase.ACCESS, new EnumExtender());
+        // ModLauncher 的启动插件（模组通过 cpw.mods.modlauncher.Launcher 注册）排在 AT 和枚举扩展之后
+        registry.add(TransformerPhase.ACCESS, new LaunchPluginBridge());
     }
 
-    /** 读出并合并这些模组的 {@code META-INF/accesstransformer.cfg}；一条都没有时返回空。 */
-    public static Optional<AccessTransformers> accessTransformers(List<ModCandidate> mods) {
-        AccessTransformers.Builder builder = AccessTransformers.builder();
+    /** 这些模组的 {@code META-INF/accesstransformer.cfg} 原文（同一个 jar 只读一次）。写错的行在这里报出来。 */
+    static List<ActiveAccessTransformers.Source> accessTransformerSources(List<ModCandidate> mods) {
+        List<ActiveAccessTransformers.Source> out = new ArrayList<>();
         Set<Path> seen = new HashSet<>();
-        int files = 0;
         for (ModCandidate mod : mods) {
             if (mod.accessTransformers().isEmpty() || mod.origin() == null || !seen.add(mod.origin())) {
                 continue;
             }
             try (ModJar jar = ModJar.open(mod.origin())) {
                 for (String path : mod.accessTransformers()) {
-                    Optional<String> text = jar.readString(path);
-                    if (text.isPresent()) {
-                        builder.parse(text.get(), mod.id());
-                        files++;
-                    }
+                    jar.readString(path).ifPresent(text -> out.add(new ActiveAccessTransformers.Source(text, mod.id())));
                 }
             } catch (IOException e) {
                 Log.warn(Messages.tr("forge.atUnreadable", mod.describe(), e.toString()));
             }
         }
-        builder.problems().forEach(p -> Log.warn(Messages.tr("forge.atBadLine", p)));
-        AccessTransformers at = builder.build();
-        if (at.isEmpty()) {
-            return Optional.empty();
+        List<String> problems = new ArrayList<>();
+        int entries = 0;
+        for (ActiveAccessTransformers.Source s : out) {
+            entries += AccessTransformers.parseEntries(s.text(), s.origin(), problems).size();
         }
-        Log.debug("Forge access transformers: " + at.entryCount() + " entries from " + files + " file(s)");
-        return Optional.of(at);
+        problems.forEach(p -> Log.warn(Messages.tr("forge.atBadLine", p)));
+        if (entries > 0) {
+            Log.debug("Forge access transformers: " + entries + " entries from " + out.size() + " file(s)");
+        }
+        return out;
     }
 
     /**

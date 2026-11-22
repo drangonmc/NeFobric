@@ -1,6 +1,7 @@
 package net.minecraftforge.fml.loading.moddiscovery;
 
 import cpw.mods.jarhandling.SecureJar;
+import cpw.mods.jarhandling.impl.Jar;
 import net.minecraftforge.forgespi.language.IModFileInfo;
 import net.minecraftforge.forgespi.language.IModInfo;
 import net.minecraftforge.forgespi.language.IModLanguageProvider;
@@ -64,23 +65,8 @@ public class ModFile implements IModFile {
 
     @Override
     public SecureJar getSecureJar() {
-        ModFile self = this;
-        return new SecureJar() {
-            @Override
-            public Path getPrimaryPath() {
-                return filePath;
-            }
-
-            @Override
-            public Path getRootPath() {
-                return self.root();
-            }
-
-            @Override
-            public String name() {
-                return modFileInfo == null ? filePath.getFileName().toString() : modFileInfo.moduleName();
-            }
-        };
+        return new Jar(filePath, this::root,
+                () -> modFileInfo == null ? filePath.getFileName().toString() : modFileInfo.moduleName());
     }
 
     @Override

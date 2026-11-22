@@ -20,33 +20,50 @@ import java.util.Set;
  * 外部类的内部类表里也有它的条目，一起改，保证反射看到的一致。</p>
  */
 public final class AccessTransformerApplier implements ClassTransformer {
-    private final AccessTransformers ats;
-    /** 自己没有修改、但内部类表里列着被改的内部类的那些外部类。 */
-    private final Set<String> outers = new HashSet<>();
+    /** 当前的修改和受影响的外部类；运行中加了新的 AT 文件时整体换掉（{@link #update}）。 */
+    private volatile State state;
+
+    private record State(AccessTransformers ats, Set<String> outers) {
+        static State of(AccessTransformers ats) {
+            // 自己没有修改、但内部类表里列着被改的内部类的那些外部类
+            Set<String> outers = new HashSet<>();
+            for (String name : ats.targetClasses()) {
+                AccessTransformers.ClassChanges cc = ats.forClass(name);
+                if (cc.self() == null) {
+                    continue;
+                }
+                for (int i = name.indexOf('$'); i > 0; i = name.indexOf('$', i + 1)) {
+                    outers.add(name.substring(0, i));
+                }
+            }
+            return new State(ats, Set.copyOf(outers));
+        }
+    }
 
     public AccessTransformerApplier(AccessTransformers ats) {
-        this.ats = ats;
-        for (String name : ats.targetClasses()) {
-            AccessTransformers.ClassChanges cc = ats.forClass(name);
-            if (cc.self() == null) {
-                continue;
-            }
-            for (int i = name.indexOf('$'); i > 0; i = name.indexOf('$', i + 1)) {
-                outers.add(name.substring(0, i));
-            }
-        }
+        this.state = State.of(ats);
+    }
+
+    /** 换成新的修改（例如运行中又加了 AT 文件）。只影响之后才加载的类，和 Forge 一样。 */
+    public void update(AccessTransformers ats) {
+        this.state = State.of(ats);
+    }
+
+    public AccessTransformers current() {
+        return state.ats();
     }
 
     @Override
     public byte[] transform(String className, byte[] bytes) {
+        State st = state;
         String internal = className.replace('.', '/');
-        AccessTransformers.ClassChanges own = ats.forClass(internal);
-        if (own == null && !outers.contains(internal)) {
+        AccessTransformers.ClassChanges own = st.ats().forClass(internal);
+        if (own == null && !st.outers().contains(internal)) {
             return bytes;
         }
         ClassReader reader = new ClassReader(bytes);
         ClassWriter writer = new ClassWriter(reader, 0);
-        reader.accept(new Visitor(writer, internal, own, madeNonPrivate(reader, own)), 0);
+        reader.accept(new Visitor(writer, st.ats(), internal, own, madeNonPrivate(reader, own)), 0);
         return writer.toByteArray();
     }
 
@@ -74,14 +91,17 @@ public final class AccessTransformerApplier implements ClassTransformer {
         return out;
     }
 
-    private final class Visitor extends ClassVisitor {
+    private static final class Visitor extends ClassVisitor {
+        private final AccessTransformers ats;
         private final String name;
         private final AccessTransformers.ClassChanges own;
         private final Set<String> nowVirtual;
         private boolean isInterface;
 
-        Visitor(ClassVisitor next, String name, AccessTransformers.ClassChanges own, Set<String> nowVirtual) {
+        Visitor(ClassVisitor next, AccessTransformers ats, String name, AccessTransformers.ClassChanges own,
+                Set<String> nowVirtual) {
             super(Opcodes.ASM9, next);
+            this.ats = ats;
             this.name = name;
             this.own = own;
             this.nowVirtual = nowVirtual;

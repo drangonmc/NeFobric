@@ -13,6 +13,8 @@ import org.objectweb.asm.tree.MethodNode;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -148,6 +150,48 @@ class AccessTransformerTest {
         AccessTransformers at = AccessTransformers.builder().parse("public a.B f\n", "test").build();
         byte[] in = bytes(FIXTURE);
         assertSame(in, new AccessTransformerApplier(at).transform(FIXTURE, in));
+    }
+
+    @Test
+    void parsesEntriesLineByLine() {
+        List<String> problems = new ArrayList<>();
+        List<AccessTransformers.Entry> entries = AccessTransformers.parseEntries("""
+                public a.B
+                protected-f a.B f # comment
+                public a.B m (I)V
+                public a.B *
+                public a.B *()
+                nope a.B
+                """, "file", problems);
+        assertEquals(5, entries.size());
+        assertEquals(List.of("file line 6: unknown modifier nope: nope a.B"), problems);
+        assertTrue(entries.get(0).isClass());
+        assertEquals("f", entries.get(1).memberName());
+        assertEquals(AccessTransformers.Final.REMOVE, entries.get(1).change().finality());
+        assertEquals(2, entries.get(1).line());
+        assertTrue(entries.get(2).isMethod());
+        assertEquals("m", entries.get(2).memberName());
+        assertEquals("(I)V", entries.get(2).methodDesc());
+        assertTrue(entries.get(3).isAllFields());
+        assertTrue(entries.get(4).isAllMethods());
+    }
+
+    @Test
+    void appliesAccessTransformersAddedLater() throws IOException {
+        AccessTransformerApplier applier = new AccessTransformerApplier(AccessTransformers.empty());
+        ActiveAccessTransformers.install(List.of(), applier);
+        try {
+            byte[] in = bytes(FIXTURE);
+            assertSame(in, applier.transform(FIXTURE, in));
+            List<String> problems = ActiveAccessTransformers.add(
+                    "public dev.nefobric.compat.forge.transform.AtFixture counter\nbogus x.Y\n", "late");
+            assertEquals(1, problems.size(), problems.toString());
+            assertEquals(1, ActiveAccessTransformers.sources().size());
+            ClassNode out = read(applier.transform(FIXTURE, in));
+            assertTrue((field(out, "counter").access & Opcodes.ACC_PUBLIC) != 0);
+        } finally {
+            ActiveAccessTransformers.install(List.of(), null);
+        }
     }
 
     static byte[] bytes(String className) throws IOException {
