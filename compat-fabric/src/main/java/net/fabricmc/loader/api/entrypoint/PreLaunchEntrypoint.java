@@ -1,8 +1,6 @@
 package net.fabricmc.loader.api.entrypoint;
 
-/**
- * 最早的入口（{@code "preLaunch"}）：类加载器就绪后、游戏代码运行前。此时不要碰任何游戏类。
- */
+/** 在游戏类加载之前运行的入口（键 “preLaunch”）。 */
 @FunctionalInterface
 public interface PreLaunchEntrypoint {
     void onPreLaunch();
