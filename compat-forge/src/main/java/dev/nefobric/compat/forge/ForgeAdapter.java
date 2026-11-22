@@ -2,6 +2,8 @@ package dev.nefobric.compat.forge;
 
 import dev.nefobric.compat.forge.transform.AccessTransformerApplier;
 import dev.nefobric.compat.forge.transform.AccessTransformers;
+import dev.nefobric.compat.forge.transform.EnumExtender;
+import dev.nefobric.compat.forge.transform.ExtensibleVanillaEnums;
 import dev.nefobric.compat.forge.transform.OnlyInStripper;
 import dev.nefobric.loader.Env;
 import dev.nefobric.loader.discovery.ModJar;
@@ -160,8 +162,11 @@ public final class ForgeAdapter implements EcosystemAdapter {
         if (mods.isEmpty()) {
             return;
         }
+        registry.add(TransformerPhase.GAME_PATCH, new ExtensibleVanillaEnums());
         registry.add(TransformerPhase.STRIP, new OnlyInStripper(loader.env() == Env.CLIENT ? "CLIENT" : "DEDICATED_SERVER"));
         accessTransformers(mods).ifPresent(at -> registry.add(TransformerPhase.ACCESS, new AccessTransformerApplier(at)));
+        // 和 Forge 一样，枚举扩展看到的是 AT 改过的类
+        registry.add(TransformerPhase.ACCESS, new EnumExtender());
     }
 
     /** 读出并合并这些模组的 {@code META-INF/accesstransformer.cfg}；一条都没有时返回空。 */
