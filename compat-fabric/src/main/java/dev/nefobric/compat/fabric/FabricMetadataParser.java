@@ -14,6 +14,7 @@ import dev.nefobric.compat.fabric.metadata.ModDependencyImpl;
 import dev.nefobric.compat.fabric.metadata.PersonImpl;
 import dev.nefobric.compat.fabric.version.FabricPredicateAdapter;
 import dev.nefobric.compat.fabric.version.VersionParser;
+import dev.nefobric.loader.mapping.Mappings;
 import dev.nefobric.loader.metadata.Dependency;
 import dev.nefobric.loader.metadata.Ecosystem;
 import dev.nefobric.loader.metadata.ModCandidate;
@@ -97,7 +98,9 @@ public final class FabricMetadataParser {
         meta.environment(environment);
         ModCandidate.Builder b = ModCandidate.builder(id, versionString, Ecosystem.FABRIC)
                 .origin(origin)
-                .environment(toSide(environment));
+                .environment(toSide(environment))
+                // Fabric 模组按 intermediary 编译，核心据此把整个 jar（含 refmap）重映射到运行时命名空间
+                .sourceNamespace(Mappings.INTERMEDIARY);
 
         if (o.has("entrypoints")) {
             for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("entrypoints").entrySet()) {

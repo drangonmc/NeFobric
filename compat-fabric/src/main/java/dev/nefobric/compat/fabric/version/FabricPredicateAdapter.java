@@ -13,7 +13,8 @@ public final class FabricPredicateAdapter implements VersionPredicate {
 
     public FabricPredicateAdapter(ModDependency dependency, String text) {
         this.dependency = dependency;
-        this.text = text;
+        // “*” 用核心的“任意版本”说法，报错信息和其他生态一致
+        this.text = text.trim().equals("*") || text.trim().isEmpty() ? VersionPredicate.any().describe() : text;
     }
 
     @Override
