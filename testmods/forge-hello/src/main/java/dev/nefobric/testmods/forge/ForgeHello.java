@@ -46,6 +46,7 @@ public class ForgeHello {
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC);
         probeTransformers();
+        LoaderInternals.probe();
         HELLO.addListener(cap -> {
             LazyOptional<HelloCapability> impl = LazyOptional.of(() -> () -> "hi");
             System.out.println("[forge_hello] capability registered: " + cap.getName() + ", greet="

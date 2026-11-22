@@ -151,6 +151,137 @@ public final class AccessTransformers {
         return new Builder();
     }
 
+    /**
+     * AT 文件里的一行。{@code member} 为 {@code null} 表示类本身，{@code "*"} 是所有字段，{@code "*()"} 是所有方法；
+     * 方法是名字直接接描述符（{@code m_41462_(I)Z}），字段只有名字。
+     *
+     * @param owner 内部名（{@code net/minecraft/Foo$Bar}）
+     * @param line  从 1 开始的行号
+     */
+    public record Entry(String owner, String member, Change change, int line) {
+        public boolean isClass() {
+            return member == null;
+        }
+
+        public boolean isAllFields() {
+            return "*".equals(member);
+        }
+
+        public boolean isAllMethods() {
+            return "*()".equals(member);
+        }
+
+        public boolean isMethod() {
+            return member != null && member.indexOf('(') > 0;
+        }
+
+        /** 字段名或方法名（不带描述符）；类本身时为 {@code null}。 */
+        public String memberName() {
+            if (member == null) {
+                return null;
+            }
+            int paren = member.indexOf('(');
+            return paren < 0 ? member : member.substring(0, paren);
+        }
+
+        /** 方法描述符；不是方法时为 {@code null}。 */
+        public String methodDesc() {
+            int paren = member == null ? -1 : member.indexOf('(');
+            return paren > 0 ? member.substring(paren) : null;
+        }
+    }
+
+    /**
+     * 逐行解析一个 AT 文件，不合并。写错的行跳过，原因加进 {@code problems}。Forge 运行时的
+     * {@code AccessTransformerList} 也用它，两边对格式的理解一致。
+     *
+     * @param origin 出处，用于提示，例如模组 id
+     */
+    public static List<Entry> parseEntries(String text, String origin, List<String> problems) {
+        List<Entry> out = new ArrayList<>();
+        String[] lines = text.split("\\R");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            int hash = line.indexOf('#');
+            if (hash >= 0) {
+                line = line.substring(0, hash);
+            }
+            line = line.strip();
+            if (line.isEmpty()) {
+                continue;
+            }
+            String[] error = new String[1];
+            Entry e = parseLine(line, i + 1, error);
+            if (e == null) {
+                problems.add(origin + " line " + (i + 1) + ": " + error[0] + ": " + line);
+            } else {
+                out.add(e);
+            }
+        }
+        return out;
+    }
+
+    private static Entry parseLine(String line, int lineNo, String[] error) {
+        String[] t = line.split("\\s+");
+        if (t.length < 2) {
+            error[0] = "missing class name";
+            return null;
+        }
+        Change change = parseModifier(t[0]);
+        if (change == null) {
+            error[0] = "unknown modifier " + t[0];
+            return null;
+        }
+        String owner = t[1].replace('.', '/');
+        if (owner.isEmpty() || owner.contains("(")) {
+            error[0] = "bad class name";
+            return null;
+        }
+        if (t.length == 2) {
+            return new Entry(owner, null, change, lineNo);
+        }
+        String member = t[2];
+        // 少数文件在方法名和描述符之间留了空格
+        if (t.length >= 4 && t[3].startsWith("(") && !member.contains("(")) {
+            member = member + t[3];
+        } else if (t.length > 3) {
+            error[0] = "unexpected text after member";
+            return null;
+        }
+        int paren = member.indexOf('(');
+        if (paren > 0 && !member.equals("*()")) {
+            String desc = member.substring(paren);
+            if (desc.indexOf(')') < 0 || desc.endsWith(")")) {
+                error[0] = "bad method descriptor";
+                return null;
+            }
+        } else if (paren == 0) {
+            error[0] = "bad member";
+            return null;
+        }
+        return new Entry(owner, member, change, lineNo);
+    }
+
+    private static Change parseModifier(String s) {
+        Final f = Final.LEAVE;
+        String name = s;
+        if (s.endsWith("-f")) {
+            f = Final.REMOVE;
+            name = s.substring(0, s.length() - 2);
+        } else if (s.endsWith("+f")) {
+            f = Final.MAKE;
+            name = s.substring(0, s.length() - 2);
+        }
+        Access a = switch (name) {
+            case "public" -> Access.PUBLIC;
+            case "protected" -> Access.PROTECTED;
+            case "default" -> Access.DEFAULT;
+            case "private" -> Access.PRIVATE;
+            default -> null;
+        };
+        return a == null ? null : new Change(a, f);
+    }
+
     public static final class Builder {
         private final Map<String, ClassChanges> classes = new HashMap<>();
         private final List<String> problems = new ArrayList<>();
@@ -162,89 +293,23 @@ public final class AccessTransformers {
          * @param origin 出处，用于提示，例如模组 id
          */
         public Builder parse(String text, String origin) {
-            String[] lines = text.split("\\R");
-            for (int i = 0; i < lines.length; i++) {
-                String line = lines[i];
-                int hash = line.indexOf('#');
-                if (hash >= 0) {
-                    line = line.substring(0, hash);
-                }
-                line = line.strip();
-                if (line.isEmpty()) {
-                    continue;
-                }
-                String error = parseLine(line);
-                if (error != null) {
-                    problems.add(origin + " line " + (i + 1) + ": " + error + ": " + line);
+            for (Entry e : parseEntries(text, origin, problems)) {
+                ClassChanges cc = classes.computeIfAbsent(e.owner(), k -> new ClassChanges());
+                Change change = e.change();
+                if (e.isClass()) {
+                    cc.self = change.merge(cc.self);
+                } else if (e.isAllFields()) {
+                    cc.allFields = change.merge(cc.allFields);
+                } else if (e.isAllMethods()) {
+                    cc.allMethods = change.merge(cc.allMethods);
+                } else if (e.isMethod()) {
+                    cc.methods.merge(e.member(), change, Change::merge);
                 } else {
-                    entries++;
+                    cc.fields.merge(e.member(), change, Change::merge);
                 }
+                entries++;
             }
             return this;
-        }
-
-        private String parseLine(String line) {
-            String[] t = line.split("\\s+");
-            if (t.length < 2) {
-                return "missing class name";
-            }
-            Change change = parseModifier(t[0]);
-            if (change == null) {
-                return "unknown modifier " + t[0];
-            }
-            String owner = t[1].replace('.', '/');
-            if (owner.isEmpty() || owner.contains("(")) {
-                return "bad class name";
-            }
-            ClassChanges cc = classes.computeIfAbsent(owner, k -> new ClassChanges());
-            if (t.length == 2) {
-                cc.self = change.merge(cc.self);
-                return null;
-            }
-            String member = t[2];
-            // 少数文件在方法名和描述符之间留了空格
-            if (t.length >= 4 && t[3].startsWith("(") && !member.contains("(")) {
-                member = member + t[3];
-            } else if (t.length > 3) {
-                return "unexpected text after member";
-            }
-            if (member.equals("*")) {
-                cc.allFields = change.merge(cc.allFields);
-            } else if (member.equals("*()")) {
-                cc.allMethods = change.merge(cc.allMethods);
-            } else if (member.indexOf('(') > 0) {
-                int paren = member.indexOf('(');
-                String desc = member.substring(paren);
-                if (desc.indexOf(')') < 0 || desc.endsWith(")")) {
-                    return "bad method descriptor";
-                }
-                cc.methods.merge(member.substring(0, paren) + desc, change, Change::merge);
-            } else if (member.indexOf('(') < 0) {
-                cc.fields.merge(member, change, Change::merge);
-            } else {
-                return "bad member";
-            }
-            return null;
-        }
-
-        private static Change parseModifier(String s) {
-            Final f = Final.LEAVE;
-            String name = s;
-            if (s.endsWith("-f")) {
-                f = Final.REMOVE;
-                name = s.substring(0, s.length() - 2);
-            } else if (s.endsWith("+f")) {
-                f = Final.MAKE;
-                name = s.substring(0, s.length() - 2);
-            }
-            Access a = switch (name) {
-                case "public" -> Access.PUBLIC;
-                case "protected" -> Access.PROTECTED;
-                case "default" -> Access.DEFAULT;
-                case "private" -> Access.PRIVATE;
-                default -> null;
-            };
-            return a == null ? null : new Change(a, f);
         }
 
         public List<String> problems() {

@@ -24,6 +24,11 @@ dependencies {
     minecraftLibs 'org.apache.logging.log4j:log4j-core:2.19.0'
     minecraftLibs 'org.slf4j:slf4j-api:2.0.1'
     minecraftLibs 'org.apache.commons:commons-lang3:3.12.0'
+    // 真实模组（和它们的 Mixin 插件）常用、真游戏 classpath 上也有的库：缺了会在假游戏里提前失败，掩盖真正的问题
+    minecraftLibs 'com.google.guava:guava:31.1-jre'
+    minecraftLibs 'com.google.guava:failureaccess:1.0.1'
+    minecraftLibs 'com.google.code.gson:gson:2.10'
+    minecraftLibs 'it.unimi.dsi:fastutil:8.5.9'
 }
 
 // 给端到端测试用：客户端 classpath 上的原版库
