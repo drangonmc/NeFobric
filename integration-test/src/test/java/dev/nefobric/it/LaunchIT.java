@@ -31,6 +31,7 @@ class LaunchIT {
     private static final Path FAKE_SERVER = prop("fakeServerJar");
     private static final List<Path> TEST_MODS = List.of(prop("fabricHelloJar"), prop("forgeHelloJar"),
             prop("neoforgeHelloJar"));
+    private static final Path FABRIC_JIJ = prop("fabricJijJar");
 
     private static Path prop(String key) {
         String v = System.getProperty("nefobric.it." + key);
@@ -239,5 +240,27 @@ class LaunchIT {
         assertEquals(1, r.exitCode(), r.output());
         r.assertInOrder("A mod failed to initialize", "Stopping the server because a mod failed to initialize");
         assertFalse(r.output().contains("[FakeGame] server running"), r.output());
+    }
+
+    @Test
+    void nestedJarsAreExtractedAndLoaded(@TempDir Path gameDir) throws Exception {
+        // 和 Fabric Loom 打出来的模组一样：META-INF/jars 里有一个模组（它又内嵌一个模组）和一个普通库
+        Path mods = Files.createDirectories(gameDir.resolve("mods"));
+        Files.copy(FABRIC_JIJ, mods.resolve(FABRIC_JIJ.getFileName()));
+        List<String> cmd = java("-cp", LOADER + File.pathSeparator + FAKE_CLIENT,
+                "dev.nefobric.loader.launch.ClientMain", "--gameDir", gameDir.toString());
+        Run r = run(gameDir, cmd);
+
+        assertEquals(0, r.exitCode(), r.output());
+        r.assertInOrder(
+                "Loading 3 mod(s) (Fabric 3)",
+                "fabric-jij-1.0.0.jar!/fabric-jij-lib-1.0.0.jar!/fabric-jij-deep-1.0.0.jar",
+                "[fabric_jij_lib] nested mod entrypoint ran",
+                "[fabric_jij] host: hello from a nested mod, plain=plain library loaded, libLoaded=true,"
+                        + " deepLoaded=true",
+                "[FakeGame] client running");
+        try (Stream<Path> cached = Files.walk(gameDir.resolve(".nefobric/cache/jij"))) {
+            assertEquals(3, cached.filter(p -> p.toString().endsWith(".jar")).count());
+        }
     }
 }

@@ -128,4 +128,106 @@ class ModResolverTest {
         assertEquals(6, order.size());
         assertTrue(r.warnings().stream().anyMatch(w -> w.contains("Circular")), r.warnings().toString());
     }
+
+    // ---- Jar-in-Jar ----
+
+    private static ModCandidate nested(String id, String version, ModCandidate parent) {
+        ModCandidate c = ModCandidate.builder(id, version, Ecosystem.FABRIC)
+                .origin(Paths.get("cache", id + "-" + version + ".jar")).build();
+        c.linkNested(parent, "META-INF/jars/" + id + "-" + version + ".jar");
+        return c;
+    }
+
+    private static List<String> idsAndVersions(ModResolver.Result r) {
+        return r.mods().stream().map(m -> m.id() + "@" + m.version()).sorted().toList();
+    }
+
+    @Test
+    void nestedDuplicatesKeepTheNewestVersion() {
+        ModCandidate a = mod("a", Ecosystem.FABRIC).build();
+        ModCandidate b = mod("b", Ecosystem.FABRIC).build();
+        ModResolver.Result r = resolve(Env.CLIENT, a, b,
+                nested("fabric-api-base", "0.4.29+b04edc7a77", a),
+                nested("fabric-api-base", "0.4.31+ef105b4977", b),
+                nested("fabric-api-base", "0.4.31+ef105b4977", a));
+        assertFalse(r.hasErrors(), r.errors().toString());
+        assertEquals(List.of("a@1.0.0", "b@1.0.0", "fabric-api-base@0.4.31+ef105b4977"), idsAndVersions(r));
+        assertEquals(1, r.notes().size(), r.notes().toString());
+        assertTrue(r.notes().get(0).contains("0.4.29"), r.notes().get(0));
+    }
+
+    @Test
+    void sameVersionTopLevelCopyWinsOverNestedOneAndNewerNestedWinsOverTopLevel() {
+        ModCandidate parent = mod("parent", Ecosystem.FABRIC).build();
+        ModCandidate topLib = ModCandidate.builder("lib", "2.0.0", Ecosystem.FABRIC).origin(Paths.get("lib.jar")).build();
+        ModResolver.Result same = resolve(Env.CLIENT, parent, nested("lib", "2.0.0", parent), topLib);
+        assertFalse(same.hasErrors(), same.errors().toString());
+        assertTrue(same.mods().contains(topLib));
+
+        ModCandidate parent2 = mod("parent", Ecosystem.FABRIC).build();
+        ModCandidate newer = nested("lib", "2.1.0", parent2);
+        ModResolver.Result r = resolve(Env.CLIENT, parent2, newer,
+                ModCandidate.builder("lib", "2.0.0", Ecosystem.FABRIC).origin(Paths.get("lib.jar")).build());
+        assertFalse(r.hasErrors(), r.errors().toString());
+        assertTrue(r.mods().contains(newer));
+    }
+
+    @Test
+    void forgeStyleVersionsAreComparedToo() {
+        ModCandidate a = mod("a", Ecosystem.FORGE).build();
+        ModCandidate b = mod("b", Ecosystem.FORGE).build();
+        ModResolver.Result r = resolve(Env.CLIENT, a, b, nested("geckolib", "4.4.10", a), nested("geckolib", "4.4.9", b));
+        assertEquals(List.of("a@1.0.0", "b@1.0.0", "geckolib@4.4.10"), idsAndVersions(r));
+        assertTrue(ModResolver.compareVersions("1.20.1-47.1.3", "1.20.1-47.1.10") < 0);
+        assertTrue(ModResolver.compareVersions("0.92.2+1.20.1", "0.92.12+1.20.1") < 0);
+    }
+
+    @Test
+    void nestedModsOfAnUnselectedCopyAreNotLoaded() {
+        // 两个模组内嵌了不同版本的 lib，旧版 lib 里又内嵌了 old_only；选了新版 lib 之后 old_only 不应该加载
+        ModCandidate a = mod("a", Ecosystem.FABRIC).build();
+        ModCandidate b = mod("b", Ecosystem.FABRIC).build();
+        ModCandidate oldLib = nested("lib", "1.0.0", a);
+        ModCandidate newLib = nested("lib", "2.0.0", b);
+        ModCandidate oldOnly = nested("old_only", "1.0.0", oldLib);
+        ModCandidate shared1 = nested("shared", "1.0.0", oldLib);
+        ModCandidate shared2 = nested("shared", "1.0.0", newLib);
+        ModResolver.Result r = resolve(Env.CLIENT, a, b, oldLib, newLib, oldOnly, shared1, shared2);
+        assertFalse(r.hasErrors(), r.errors().toString());
+        assertEquals(List.of("a@1.0.0", "b@1.0.0", "lib@2.0.0", "shared@1.0.0"), idsAndVersions(r));
+        assertTrue(r.mods().contains(shared2), "the copy inside the selected lib is used");
+    }
+
+    @Test
+    void nestedModsFollowTheirParentsSide() {
+        ModCandidate clientOnly = mod("hud", Ecosystem.FABRIC).environment(SideRestriction.CLIENT).build();
+        ModCandidate lib = nested("hud_lib", "1.0.0", clientOnly);
+        ModCandidate libOfLib = nested("hud_lib_core", "1.0.0", lib);
+        ModResolver.Result server = resolve(Env.SERVER, clientOnly, lib, libOfLib);
+        assertFalse(server.hasErrors(), server.errors().toString());
+        assertTrue(server.mods().isEmpty(), server.mods().toString());
+        assertEquals(3, server.notes().size(), server.notes().toString());
+        ModResolver.Result client = resolve(Env.CLIENT, clientOnly, lib, libOfLib);
+        assertEquals(3, client.mods().size());
+    }
+
+    @Test
+    void nestedCopiesOfBuiltinsAndMixinExtrasAreDropped() {
+        ModCandidate a = mod("a", Ecosystem.FABRIC).build();
+        ModResolver.Result r = new ModResolver(Env.CLIENT).resolve(List.of(a,
+                        nested("fabricloader", "0.14.0", a),
+                        nested("mixinextras", "0.3.5", a),
+                        ModCandidate.builder("mixinextras", "0.2.0", Ecosystem.FORGE).origin(Paths.get("mixinextras-forge.jar"))
+                                .build()),
+                List.of(BUILTINS.get(0), BUILTINS.get(2),
+                        ModCandidate.builder("mixinextras", "0.4.1", Ecosystem.BUILTIN).build()));
+        assertFalse(r.hasErrors(), r.errors().toString());
+        assertEquals(List.of(a), r.mods());
+        assertEquals(2, r.notes().size(), r.notes().toString());
+        assertTrue(r.notes().get(1).contains("mixinextras-forge.jar"), r.notes().get(1));
+
+        // 直接放进 mods 的同名模组仍然报错
+        ModResolver.Result direct = resolve(Env.CLIENT, mod("fabricloader", Ecosystem.FABRIC).build());
+        assertEquals(1, direct.errors().size());
+    }
 }

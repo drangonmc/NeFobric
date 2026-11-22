@@ -26,15 +26,16 @@ NeFobric 是一个从零自研的 Minecraft 模组加载器，目标是让 Fabri
 | 类变换流水线 | `TransformerPhase`：`GAME_PATCH` → `STRIP` → `ACCESS` → `MIXIN`，兼容层通过 `EcosystemAdapter.registerTransformers` 挂变换器 |
 | Mixin | 加载器自带 Fabric 的 Mixin 分支 0.15.4（上游 0.8.7）和 MixinExtras 0.4.1，Fabric 与 Forge 系模组共用。按模组加载顺序注册配置，Fabric 配置带模组 id 和兼容等级装饰；Mixin 读类信息时看到的是 Mixin 之前各阶段的结果 |
 | Fabric Loader API | 完整的 Fabric Loader 0.16 公开 API、`fabric.mod.json` 全字段、access widener、`@Environment` 剥离 |
+| Jar-in-Jar | Fabric 的 `META-INF/jars` 和 Forge 的 `META-INF/jarjar` 按内容解到 `.nefobric/cache/jij/`，可以多层嵌套。内嵌的模组和普通模组一样参与依赖解析：同一个模组被多处内嵌时取最高版本，内嵌它的模组没被选中（或不在这一端运行）时它也不加载；没有模组元数据的内嵌 jar 作为普通库加载；内嵌的 MixinExtras 等加载器自带的模组让给自带的那份 |
 
-**还没有做**：Jar-in-Jar、Forge 的 access transformer、Fabric API、Forge 的事件总线 / 注册表 / 配置 / 网络、Forge 补丁重现、图形安装器、错误弹窗。
+**还没有做**：Forge 的 access transformer、Fabric API、Forge 的事件总线 / 注册表 / 配置 / 网络、Forge 补丁重现、图形安装器、错误弹窗。
 
 ## 加载流程
 
 1. **找游戏**：客户端在 classpath 上找含 `net/minecraft/client/main/Main.class` 的 jar；服务端读 `server.jar`，按 `META-INF/versions.list` / `libraries.list` 解到 `versions/`、`libraries/`（校验 sha256，已存在则跳过）。从 jar 里的 `version.json` 读版本号。
-2. **发现模组**：每个兼容层（通过 `ServiceLoader` 注册的 `EcosystemAdapter`）读自己认识的元数据。同一个 jar 同时带两份元数据时优先 Fabric 版。
+2. **发现模组**：每个兼容层（通过 `ServiceLoader` 注册的 `EcosystemAdapter`）读自己认识的元数据。同一个 jar 同时带两份元数据时优先 Fabric 版。模组内嵌的 jar 解到缓存里，用同样的方式读。
 3. **解析依赖**：加上内置虚拟模组（`minecraft`、`java`、`nefobric`、`mixinextras`、`fabricloader`、`forge`、`neoforge`、`javafml`、`lowcodefml`），检查依赖并排出加载顺序。
-4. **类加载器**：游戏 jar + 兼容层运行库 + 模组 jar 交给 `NeFobricClassLoader`；装上游戏钩子变换器，再让各兼容层挂上自己的变换器。
+4. **类加载器**：游戏 jar + 兼容层运行库 + 模组 jar + 选中模组内嵌的普通库交给 `NeFobricClassLoader`；装上游戏钩子变换器，再让各兼容层挂上自己的变换器。
 5. **Mixin**：注册各模组的 Mixin 配置，进入 DEFAULT 阶段，先触发一次配置选择（Mixin 插件的 `onLoad` 在这里运行），然后把 Mixin 挂到流水线最后。配置有错时在移交游戏之前报出来。
 6. **preLaunch**：Fabric `preLaunch` 入口。
 7. **移交原版主类**。原版运行到钩子位置时：

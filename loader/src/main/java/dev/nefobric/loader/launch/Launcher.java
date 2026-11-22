@@ -109,7 +109,8 @@ public final class Launcher {
             Log.info(Messages.tr("launch.modsDirCreated", modsDir));
         }
         List<Path> jars = ModDiscoverer.findJars(modsDir);
-        ModDiscoverer.Result discovered = ModDiscoverer.read(jars, adapters);
+        Path cacheDir = args.gameDir().resolve(".nefobric").resolve("cache");
+        ModDiscoverer.Result discovered = ModDiscoverer.read(jars, adapters, cacheDir.resolve("jij"));
         discovered.notes().forEach(Log::info);
         discovered.warnings().forEach(Log::warn);
 
@@ -146,8 +147,12 @@ public final class Launcher {
         }
         List<Path> ownJars = new ArrayList<>();
         ownJars.add(game.gameJar());
-        ownJars.addAll(runtimeLibraries(adapters, game, args.gameDir().resolve(".nefobric").resolve("cache")));
+        ownJars.addAll(runtimeLibraries(adapters, game, cacheDir));
         resolved.mods().stream().map(m -> runtimePaths.getOrDefault(m, m.origin())).distinct().forEach(ownJars::add);
+        // 模组内嵌的普通库：只要内嵌它的模组被选中了
+        Set<ModCandidate> selected = Set.copyOf(resolved.mods());
+        discovered.libraries().stream().filter(l -> selected.contains(l.parent())).map(l -> l.path()).distinct()
+                .forEach(ownJars::add);
         NeFobricClassLoader classLoader = new NeFobricClassLoader(ownJars, parentLoader(game), loaderOwned);
         GameEntryPatch entryPatch = new GameEntryPatch(env, classLoader::getRawClassBytes);
         classLoader.addTransformer(entryPatch);

@@ -67,6 +67,22 @@ public final class ModJar implements Closeable {
         return manifest;
     }
 
+    /** 直接位于 {@code dir}（以 / 结尾）下、以 {@code suffix} 结尾的文件条目名，不含子目录里的。 */
+    public List<String> entries(String dir, String suffix) {
+        List<String> out = new ArrayList<>();
+        Enumeration<? extends ZipEntry> entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry e = entries.nextElement();
+            String name = e.getName();
+            if (!e.isDirectory() && name.startsWith(dir) && name.endsWith(suffix)
+                    && name.indexOf('/', dir.length()) < 0) {
+                out.add(name);
+            }
+        }
+        out.sort(null);
+        return out;
+    }
+
     /** jar 里所有普通类文件的条目名（不含 module-info 和多版本目录）。 */
     public List<String> classEntries() {
         List<String> out = new ArrayList<>();

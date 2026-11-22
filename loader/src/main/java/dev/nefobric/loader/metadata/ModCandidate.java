@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 统一元数据模型：不管模组来自 {@code fabric.mod.json} 还是 {@code META-INF/mods.toml}，
@@ -29,6 +30,9 @@ public final class ModCandidate {
     private final List<String> accessTransformers;
     private final String sourceNamespace;
     private final Map<String, Object> extras;
+    private volatile ModCandidate parent;
+    private volatile String nestedPath;
+    private final List<ModCandidate> children = new CopyOnWriteArrayList<>();
 
     private ModCandidate(Builder b) {
         this.id = b.id;
@@ -125,7 +129,43 @@ public final class ModCandidate {
     }
 
     public String fileName() {
-        return origin == null ? Messages.tr("mod.builtin") : String.valueOf(origin.getFileName());
+        if (origin == null) {
+            return Messages.tr("mod.builtin");
+        }
+        String own = String.valueOf(origin.getFileName());
+        ModCandidate p = parent;
+        return p == null ? own : p.fileName() + "!/" + own;
+    }
+
+    // ---- Jar-in-Jar：由核心在发现模组时设置 ----
+
+    /** 内嵌这个模组的模组；直接放在 mods 文件夹里的模组是 {@code null}。{@link #origin()} 是解出来的缓存文件。 */
+    public ModCandidate parent() {
+        return parent;
+    }
+
+    /** 在父模组 jar 里的路径，例如 {@code META-INF/jars/fabric-api-base-0.4.31.jar}；不是内嵌的模组是 {@code null}。 */
+    public String nestedPath() {
+        return nestedPath;
+    }
+
+    public boolean isNested() {
+        return parent != null;
+    }
+
+    /** 这个模组内嵌的、发现时读到的模组（不论最后有没有被选中）。 */
+    public List<ModCandidate> children() {
+        return Collections.unmodifiableList(children);
+    }
+
+    /** 只由核心的模组发现调用：记下这个模组是从 {@code parent} 的 {@code pathInParent} 解出来的。 */
+    public void linkNested(ModCandidate parent, String pathInParent) {
+        if (this.parent != null) {
+            throw new IllegalStateException(this + " is already nested in " + this.parent);
+        }
+        this.parent = Objects.requireNonNull(parent, "parent");
+        this.nestedPath = Objects.requireNonNull(pathInParent, "pathInParent");
+        parent.children.add(this);
     }
 
     /** 给玩家看的简短描述，例如 “examplemod 1.0.0（Fabric，example.jar）”。 */

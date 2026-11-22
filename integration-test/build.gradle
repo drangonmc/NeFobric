@@ -6,10 +6,14 @@ def itInputs = [
         fabricHelloJar : ':testmods:fabric-hello:jar',
         forgeHelloJar  : ':testmods:forge-hello:jar',
         neoforgeHelloJar: ':testmods:neoforge-hello:jar',
+        fabricJijJar   : ':testmods:fabric-jij:jar',
 ]
 
 test {
     itInputs.each { key, path -> dependsOn path }
+    // 只传路径的话 Gradle 不知道这些 jar 是输入，加载器改了也会跳过端到端测试
+    inputs.files({ itInputs.values().collect { project.tasks.getByPath(it).outputs.files } })
+            .withPropertyName('itJars').withNormalizer(ClasspathNormalizer)
     doFirst {
         itInputs.each { key, path ->
             def task = project.tasks.getByPath(path)

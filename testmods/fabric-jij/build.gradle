@@ -1,0 +1,43 @@
+// Jar-in-Jar 测试模组，按 Fabric Loom 的打包方式：META-INF/jars/ 里放一个 Fabric 模组（它自己又内嵌了一个模组）
+// 和一个没有 fabric.mod.json 的普通库。只依赖 Fabric Loader 的公开 API。
+version = '1.0.0'
+
+sourceSets {
+    nestedMod
+    deepMod
+    plainLib
+}
+
+dependencies {
+    compileOnly project(':compat-fabric')
+    compileOnly sourceSets.nestedMod.output
+    compileOnly sourceSets.plainLib.output
+    nestedModCompileOnly project(':compat-fabric')
+}
+
+def nestedDir = layout.buildDirectory.dir('nested')
+
+def deepModJar = tasks.register('deepModJar', Jar) {
+    archiveFileName = 'fabric-jij-deep-1.0.0.jar'
+    destinationDirectory = nestedDir
+    from sourceSets.deepMod.output
+}
+
+def nestedModJar = tasks.register('nestedModJar', Jar) {
+    archiveFileName = 'fabric-jij-lib-1.0.0.jar'
+    destinationDirectory = nestedDir
+    from sourceSets.nestedMod.output
+    from(deepModJar) { into 'META-INF/jars' }
+}
+
+def plainLibJar = tasks.register('plainLibJar', Jar) {
+    archiveFileName = 'plain-lib-1.0.0.jar'
+    destinationDirectory = nestedDir
+    from sourceSets.plainLib.output
+}
+
+jar {
+    archiveBaseName = 'fabric-jij'
+    from(nestedModJar) { into 'META-INF/jars' }
+    from(plainLibJar) { into 'META-INF/jars' }
+}
