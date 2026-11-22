@@ -87,6 +87,10 @@ class LaunchIT {
                 // forge-hello 的 access transformer 把模拟游戏的私有方法改成了 public；@OnlyIn(CLIENT) 的方法只在客户端保留
                 "[forge_hello] access transformer: atProbe is public",
                 "[forge_hello] @OnlyIn: clientOnly " + (client ? "present" : "stripped"),
+                // 加载早期的 Forge/ModLauncher 内部接口（见 forge-hello 的 LoaderInternals）
+                "[forge_hello] AT engine: game class targeted=true",
+                "[forge_hello] late access transformer: secret is public",
+                "[forge_hello] launch plugin: patched (ArrayList)",
                 // @AutoRegisterCapability 的接口在构造之后、setup 之前注册（Forge 的 INJECT_CAPABILITIES 状态）
                 "[forge_hello] capability registered: dev/nefobric/testmods/forge/HelloCapability, greet=hi",
                 "[forge_hello] common setup: Hello from the config x3, mods=4, forge=true",
@@ -177,7 +181,8 @@ class LaunchIT {
         assertEquals(0, r.exitCode(), r.output());
         r.assertInOrder(
                 "NeFobric 0.0.1-alpha is starting Minecraft 1.20.1 (dedicated server)",
-                "Extracted 6 file(s) from server.jar",
+                // 服务端 jar、假库和 8 个原版库（log4j 两个、slf4j、commons-lang3、guava 两个、gson、fastutil）
+                "Extracted 10 file(s) from server.jar",
                 "Mixin 0.8.7 ready: 2 configs from 2 mods",
                 "[fabric_hello] preLaunch",
                 "Installed the game hook in net.minecraft.server.Main",

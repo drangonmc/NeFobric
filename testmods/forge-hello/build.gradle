@@ -6,6 +6,9 @@ dependencies {
     compileOnly("net.fabricmc:sponge-mixin:${mixin_version}") {
         transitive = false
     }
+    // 启动插件和访问变换引擎的接口里用到 ASM（运行时由加载器提供）
+    compileOnly "org.ow2.asm:asm:${asm_version}"
+    compileOnly "org.ow2.asm:asm-tree:${asm_version}"
     // Forge API：编译时用 NeFobric 自己重写的版本（和 Forge 的类名、签名一致），模组 jar 里不带这些类
     compileOnly project(path: ':compat-forge', configuration: 'forgeApiElements')
 }

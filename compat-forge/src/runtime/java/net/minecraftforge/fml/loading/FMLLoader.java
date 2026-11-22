@@ -2,7 +2,9 @@ package net.minecraftforge.fml.loading;
 
 import cpw.mods.modlauncher.api.INameMappingService;
 import dev.nefobric.forge.fml.ForgeEnvironment;
+import net.minecraftforge.accesstransformer.AccessTransformerEngine;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.moddiscovery.ModFile;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -14,6 +16,11 @@ import java.util.function.BiFunction;
 public class FMLLoader {
     public static Runnable progressWindowTick = () -> {
     };
+
+    /** 追加一个模组的 AT 文件：对之后才加载的类生效（和 Forge 一样）。 */
+    public static void addAccessTransformer(Path atPath, ModFile modName) {
+        AccessTransformerEngine.INSTANCE.addResource(atPath, modName.getFileName());
+    }
 
     public static Dist getDist() {
         return ForgeEnvironment.dist();
