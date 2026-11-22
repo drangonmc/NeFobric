@@ -63,13 +63,13 @@ public final class CoreBridge {
         return List.of(p == null ? mod.origin() : p);
     }
 
-    /** 内嵌模组的父模组。核心的 Jar-in-Jar 合并后接上。 */
+    /** 内嵌模组（Jar-in-Jar）的父模组；直接放在 mods 文件夹里的模组为空。 */
     public static Optional<ModCandidate> parent(ModCandidate mod) {
-        return Optional.empty();
+        return Optional.ofNullable(mod.parent());
     }
 
-    /** 内嵌模组在父模组 jar 里的位置，例如 META-INF/jars/x.jar。 */
+    /** 内嵌模组在父模组 jar 里的位置，例如 META-INF/jars/x.jar；不是内嵌的模组为 {@code null}。 */
     public static String nestedLocation(ModCandidate mod) {
-        return null;
+        return mod.nestedPath();
     }
 }

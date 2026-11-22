@@ -258,6 +258,11 @@ class LaunchIT {
                 "[fabric_jij_lib] nested mod entrypoint ran",
                 "[fabric_jij] host: hello from a nested mod, plain=plain library loaded, libLoaded=true,"
                         + " deepLoaded=true",
+                "[fabric_jij] containers: fabric_jij PATH, parent=-, children=[fabric_jij_lib]; "
+                        + "fabric_jij_lib nested in fabric_jij at META-INF/jars/fabric-jij-lib-1.0.0.jar,"
+                        + " parent=fabric_jij, children=[fabric_jij_deep]; "
+                        + "fabric_jij_deep nested in fabric_jij_lib at META-INF/jars/fabric-jij-deep-1.0.0.jar,"
+                        + " parent=fabric_jij_lib, children=[]",
                 "[FakeGame] client running");
         try (Stream<Path> cached = Files.walk(gameDir.resolve(".nefobric/cache/jij"))) {
             assertEquals(3, cached.filter(p -> p.toString().endsWith(".jar")).count());
