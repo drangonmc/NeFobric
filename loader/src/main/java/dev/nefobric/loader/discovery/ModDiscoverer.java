@@ -93,7 +93,11 @@ public final class ModDiscoverer {
                     candidates.addAll(mods);
                     Log.debug("Read " + mods + " from " + file + " using " + chosen.displayName());
                 } catch (ModMetadataException e) {
-                    errors.add(Messages.tr("discover.badMetadata", file, e.getMessage()));
+                    if (e.isSkip()) {
+                        warnings.add(Messages.tr("discover.skipped", file, e.getMessage()));
+                    } else {
+                        errors.add(Messages.tr("discover.badMetadata", file, e.getMessage()));
+                    }
                 }
             } catch (IOException | RuntimeException e) {
                 errors.add(Messages.tr("discover.badJar", file, String.valueOf(e.getMessage())));
