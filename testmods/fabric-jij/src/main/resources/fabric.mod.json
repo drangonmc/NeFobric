@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "fabric_jij",
+  "version": "1.0.0",
+  "name": "Fabric Jar-in-Jar Test",
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.nefobric.testmods.jij.JijHost"]
+  },
+  "jars": [
+    {"file": "META-INF/jars/fabric-jij-lib-1.0.0.jar"},
+    {"file": "META-INF/jars/plain-lib-1.0.0.jar"}
+  ],
+  "depends": {
+    "fabricloader": ">=0.14.21",
+    "fabric_jij_lib": ">=1.0.0"
+  }
+}

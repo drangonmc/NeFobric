@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "fabric_jij_lib",
+  "version": "1.0.0",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.nefobric.testmods.jij.lib.JijLib"]
+  },
+  "jars": [
+    {"file": "META-INF/jars/fabric-jij-deep-1.0.0.jar"}
+  ]
+}

@@ -5,11 +5,14 @@ import dev.nefobric.loader.metadata.Dependency;
 import dev.nefobric.loader.metadata.Ecosystem;
 import dev.nefobric.loader.metadata.ModCandidate;
 import dev.nefobric.loader.util.Messages;
+import dev.nefobric.loader.version.MavenVersion;
+import dev.nefobric.loader.version.SemanticVersion;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +32,10 @@ import java.util.stream.Collectors;
  * </ul>
  */
 public final class ModResolver {
+    /** 加载器自带、同时又常被模组单独打包或内嵌的库模组。 */
+    private static final Set<String> BUNDLED_LIBRARY_MODS = Set.of("mixinextras");
+    /** 去掉没选中的副本带进来的内嵌模组之后重新挑选的次数上限；正常的嵌套两三轮就不再变化。 */
+    private static final int MAX_SELECTION_ROUNDS = 16;
 
     public static final class Result {
         private final List<ModCandidate> mods;
@@ -91,44 +98,50 @@ public final class ModResolver {
             }
         }
 
-        // 1. 按端过滤
+        // 1. 按端过滤；内嵌在被跳过的模组里的模组跟着一起跳过
         List<ModCandidate> active = new ArrayList<>();
         for (ModCandidate c : discovered) {
-            if (c.environment().appliesTo(env)) {
-                active.add(c);
-            } else {
+            ModCandidate skippedAncestor = null;
+            for (ModCandidate p = c.parent(); p != null && skippedAncestor == null; p = p.parent()) {
+                if (!p.environment().appliesTo(env)) {
+                    skippedAncestor = p;
+                }
+            }
+            if (!c.environment().appliesTo(env)) {
                 notes.add(Messages.tr("resolve.envSkipped", c.describe(), c.environment().displayName()));
+            } else if (skippedAncestor != null) {
+                notes.add(Messages.tr("resolve.nestedEnvSkipped", c.describe(), skippedAncestor.describe(),
+                        skippedAncestor.environment().displayName()));
+            } else {
+                active.add(c);
             }
         }
 
-        // 2. 处理重复 id
-        Map<String, List<ModCandidate>> groups = new LinkedHashMap<>();
-        for (ModCandidate c : active) {
-            groups.computeIfAbsent(c.id(), k -> new ArrayList<>()).add(c);
+        // 2. 处理重复 id。内嵌的模组只有在内嵌它的模组被选中时才能选：没选中的副本带进来的内嵌模组要去掉，
+        //    同一个 id 可能因此改选另一个副本，所以重复到结果不再变化
+        Selection selection = null;
+        List<ModCandidate> candidates = active;
+        for (int round = 0; round < MAX_SELECTION_ROUNDS; round++) {
+            selection = select(candidates, byId);
+            Set<ModCandidate> chosen = identitySet(selection.selected);
+            List<ModCandidate> next = active.stream()
+                    .filter(c -> c.parent() == null || chosen.contains(c.parent())).toList();
+            if (next.equals(candidates)) {
+                break;
+            }
+            candidates = next;
         }
+        // 正常情况下上面已经收敛；万一没收敛，至少保证不加载祖先没被选中的内嵌模组
+        Set<ModCandidate> chosen = identitySet(selection.selected);
         List<ModCandidate> selected = new ArrayList<>();
-        for (Map.Entry<String, List<ModCandidate>> e : groups.entrySet()) {
-            String id = e.getKey();
-            List<ModCandidate> list = e.getValue();
-            if (byId.containsKey(id)) {
-                errors.add(Messages.tr("resolve.reservedId", list.get(0).describe(), id));
-                continue;
-            }
-            if (list.size() == 1) {
-                selected.add(list.get(0));
-                continue;
-            }
-            List<ModCandidate> fabric = list.stream().filter(c -> c.ecosystem() == Ecosystem.FABRIC).toList();
-            List<ModCandidate> forgeFamily = list.stream().filter(c -> c.ecosystem().isForgeFamily()).toList();
-            if (fabric.size() == 1 && !forgeFamily.isEmpty()) {
-                selected.add(fabric.get(0));
-                warnings.add(Messages.tr("resolve.crossDuplicate", id, fabric.get(0).describe(),
-                        forgeFamily.stream().map(ModCandidate::describe).collect(Collectors.joining("; "))));
-            } else {
-                errors.add(Messages.tr("resolve.duplicate", id,
-                        list.stream().map(c -> "  - " + c.describe()).collect(Collectors.joining("\n"))));
+        for (ModCandidate c : selection.selected) {
+            if (ancestorsChosen(c, chosen)) {
+                selected.add(c);
             }
         }
+        errors.addAll(selection.errors);
+        warnings.addAll(selection.warnings);
+        notes.addAll(selection.notes);
         for (ModCandidate c : selected) {
             byId.put(c.id(), c);
         }
@@ -156,6 +169,84 @@ public final class ModResolver {
         // 4. 排出加载顺序
         List<ModCandidate> ordered = order(selected, byId, warnings);
         return new Result(ordered, byId, errors, warnings, notes);
+    }
+
+    private record Selection(List<ModCandidate> selected, List<String> errors, List<String> warnings,
+                             List<String> notes) {
+    }
+
+    /** 每个 id 留一个候选。{@code reserved} 里只有内置模组。 */
+    private static Selection select(List<ModCandidate> candidates, Map<String, ModCandidate> reserved) {
+        List<String> errors = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        Map<String, List<ModCandidate>> groups = new LinkedHashMap<>();
+        for (ModCandidate c : candidates) {
+            groups.computeIfAbsent(c.id(), k -> new ArrayList<>()).add(c);
+        }
+        List<ModCandidate> selected = new ArrayList<>();
+        for (Map.Entry<String, List<ModCandidate>> e : groups.entrySet()) {
+            String id = e.getKey();
+            List<ModCandidate> list = e.getValue();
+            if (reserved.containsKey(id)) {
+                // 内嵌的副本（以及模组单独打包的 MixinExtras）让给加载器自带的那份；直接放进 mods 的同名模组仍然报错
+                List<ModCandidate> topLevel = list.stream()
+                        .filter(c -> !c.isNested() && !BUNDLED_LIBRARY_MODS.contains(id)).toList();
+                if (topLevel.isEmpty()) {
+                    notes.add(Messages.tr("resolve.builtinProvided", id,
+                            list.stream().map(ModCandidate::fileName).distinct().collect(Collectors.joining(", "))));
+                } else {
+                    errors.add(Messages.tr("resolve.reservedId", topLevel.get(0).describe(), id));
+                }
+                continue;
+            }
+            if (list.size() == 1) {
+                selected.add(list.get(0));
+                continue;
+            }
+            if (list.stream().anyMatch(ModCandidate::isNested)) {
+                List<ModCandidate> topLevel = list.stream().filter(c -> !c.isNested()).toList();
+                if (topLevel.size() <= 1) {
+                    // Jar-in-Jar：同一个模组被多处内嵌（或者也单独放进了 mods），取最高版本，版本相同时优先单独放的
+                    ModCandidate pick = newest(list);
+                    selected.add(pick);
+                    List<String> others = list.stream().filter(c -> !c.version().equals(pick.version()))
+                            .map(ModCandidate::describe).distinct().toList();
+                    if (!others.isEmpty()) {
+                        notes.add(Messages.tr("resolve.nestedDuplicate", id, pick.describe(),
+                                String.join("; ", others)));
+                    }
+                    continue;
+                }
+                list = topLevel;
+            }
+            List<ModCandidate> fabric = list.stream().filter(c -> c.ecosystem() == Ecosystem.FABRIC).toList();
+            List<ModCandidate> forgeFamily = list.stream().filter(c -> c.ecosystem().isForgeFamily()).toList();
+            if (fabric.size() == 1 && !forgeFamily.isEmpty()) {
+                selected.add(fabric.get(0));
+                warnings.add(Messages.tr("resolve.crossDuplicate", id, fabric.get(0).describe(),
+                        forgeFamily.stream().map(ModCandidate::describe).collect(Collectors.joining("; "))));
+            } else {
+                errors.add(Messages.tr("resolve.duplicate", id,
+                        list.stream().map(c -> "  - " + c.describe()).collect(Collectors.joining("\n"))));
+            }
+        }
+        return new Selection(selected, errors, warnings, notes);
+    }
+
+    private static boolean ancestorsChosen(ModCandidate c, Set<ModCandidate> chosen) {
+        for (ModCandidate p = c.parent(); p != null; p = p.parent()) {
+            if (!chosen.contains(p)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Set<ModCandidate> identitySet(List<ModCandidate> mods) {
+        Set<ModCandidate> set = Collections.newSetFromMap(new IdentityHashMap<>());
+        set.addAll(mods);
+        return set;
     }
 
     private static void checkDependency(ModCandidate c, Dependency d, ModCandidate target,
@@ -257,5 +348,27 @@ public final class ModResolver {
             out.addAll(cyclic);
         }
         return out;
+    }
+
+    /** 版本最高的一个；版本相同时优先不是内嵌的，再按发现顺序。 */
+    static ModCandidate newest(List<ModCandidate> list) {
+        ModCandidate best = list.get(0);
+        for (ModCandidate c : list.subList(1, list.size())) {
+            int cmp = compareVersions(c.version(), best.version());
+            if (cmp > 0 || (cmp == 0 && best.isNested() && !c.isNested())) {
+                best = c;
+            }
+        }
+        return best;
+    }
+
+    /** 两边都是语义版本时按语义版本比，否则按 Maven 的规则比（Forge 系模组的版本号）。 */
+    static int compareVersions(String a, String b) {
+        SemanticVersion sa = SemanticVersion.tryParse(a);
+        SemanticVersion sb = SemanticVersion.tryParse(b);
+        if (sa != null && sb != null) {
+            return sa.compareTo(sb);
+        }
+        return new MavenVersion(a).compareTo(new MavenVersion(b));
     }
 }

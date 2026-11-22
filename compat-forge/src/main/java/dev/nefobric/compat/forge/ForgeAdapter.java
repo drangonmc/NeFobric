@@ -123,10 +123,19 @@ public final class ForgeAdapter implements EcosystemAdapter {
         if (!mod.accessTransformers().isEmpty()) {
             out.add(Messages.tr("forge.atIgnored", mod.describe()));
         }
-        if (!mod.nestedJars().isEmpty()) {
-            out.add(Messages.tr("compat.nestedIgnored", mod.describe(), mod.nestedJars().size()));
-        }
         return out;
+    }
+
+    /**
+     * Forge 的 Jar-in-Jar：{@code META-INF/jarjar/metadata.json} 列出的 jar 都直接放在 {@code META-INF/jarjar/} 下。
+     * 同一个库的多个版本由核心按模组版本挑选；不是模组的库按出现的 jar 全部加载。
+     */
+    @Override
+    public List<String> nestedJars(ModCandidate mod, ModJar jar) {
+        if (!mod.nestedJars().contains("META-INF/jarjar/metadata.json")) {
+            return List.of();
+        }
+        return jar.entries("META-INF/jarjar/", ".jar");
     }
 
     @Override

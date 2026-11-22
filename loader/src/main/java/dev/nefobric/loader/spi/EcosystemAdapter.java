@@ -46,6 +46,15 @@ public interface EcosystemAdapter {
     /** 在给定阶段初始化属于本兼容层的模组。{@code mods} 已经按加载顺序排好。 */
     void runStage(LoadStage stage, NeFobricLoader loader, List<ModCandidate> mods) throws ModLoadingException;
 
+    /**
+     * 模组 jar 里内嵌的 jar（Jar-in-Jar）在 jar 里的路径。核心把它们解到缓存里，再像 mods 文件夹里的 jar 一样读元数据；
+     * 没有任何模组元数据的内嵌 jar 作为普通库加进类加载器。默认是 {@link ModCandidate#nestedJars()} 里以 .jar 结尾的条目
+     * （Fabric 的 {@code jars} 字段）。
+     */
+    default List<String> nestedJars(ModCandidate mod, ModJar jar) throws IOException {
+        return mod.nestedJars().stream().filter(p -> p.endsWith(".jar")).toList();
+    }
+
     /** 启动前对已选中的模组给出提示（例如未实现的功能）。 */
     default List<String> warningsFor(ModCandidate mod) {
         return List.of();
