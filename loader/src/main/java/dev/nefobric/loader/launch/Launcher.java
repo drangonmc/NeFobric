@@ -6,6 +6,8 @@ import dev.nefobric.loader.classloading.NeFobricClassLoader;
 import dev.nefobric.loader.discovery.ModDiscoverer;
 import dev.nefobric.loader.hook.GameEntryPatch;
 import dev.nefobric.loader.impl.NeFobricLoader;
+import dev.nefobric.loader.mapping.MappingStore;
+import dev.nefobric.loader.mapping.RemapCache;
 import dev.nefobric.loader.metadata.Ecosystem;
 import dev.nefobric.loader.metadata.ModCandidate;
 import dev.nefobric.loader.resolve.ModResolver;
@@ -26,6 +28,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +87,16 @@ public final class Launcher {
         if (game.version() != null && !NeFobric.TARGET_MINECRAFT.equals(game.version())) {
             Log.warn(Messages.tr("launch.versionMismatch", NeFobric.TARGET_MINECRAFT, game.version()));
         }
+        // 原版是混淆的：先读映射表，把游戏重映射成运行时命名空间（Mojang 类名 + SRG 成员名，和 Forge 一致）
+        MappingStore.Loaded maps;
+        try {
+            maps = MappingStore.load(args.gameDir(), game);
+        } catch (MappingStore.MissingMappingsException e) {
+            throw new NeFobricStartupException(List.of(e.getMessage()));
+        }
+        if (!maps.isIdentity()) {
+            game = game.withGameJar(RemapCache.game(args.gameDir(), game, maps));
+        }
 
         // 2. 发现模组
         List<EcosystemAdapter> adapters = loadAdapters();
@@ -119,22 +133,25 @@ public final class Launcher {
             }
         }
 
-        // 4. 类加载器与游戏钩子
+        // 4. 需要重映射的模组（Fabric 模组是 intermediary 名）换成缓存里重映射后的 jar
+        Map<ModCandidate, Path> runtimePaths = remapMods(args.gameDir(), resolved.mods(), maps);
+
+        // 5. 类加载器与游戏钩子
         Set<String> loaderOwned = new LinkedHashSet<>();
         for (EcosystemAdapter a : adapters) {
             loaderOwned.addAll(a.loaderOwnedClasses());
         }
         List<Path> ownJars = new ArrayList<>();
         ownJars.add(game.gameJar());
-        resolved.mods().stream().map(ModCandidate::origin).distinct().forEach(ownJars::add);
+        resolved.mods().stream().map(m -> runtimePaths.getOrDefault(m, m.origin())).distinct().forEach(ownJars::add);
         NeFobricClassLoader classLoader = new NeFobricClassLoader(ownJars, parentLoader(game), loaderOwned);
         GameEntryPatch entryPatch = new GameEntryPatch(env);
         classLoader.addTransformer(entryPatch);
         NeFobricLoader loader = NeFobricLoader.initialize(args, game, adapters, resolved.mods(), resolved.byId(),
-                classLoader);
+                classLoader, maps.mappings(), runtimePaths);
         Thread.currentThread().setContextClassLoader(classLoader);
 
-        // 5. preLaunch，然后加载（并修改）原版主类
+        // 6. preLaunch，然后加载（并修改）原版主类
         loader.runStage(LoadStage.PRE_LAUNCH);
         String mainClassName = entryPatch.targetClass();
         Class<?> mainClass = Class.forName(mainClassName, false, classLoader);
@@ -144,6 +161,42 @@ public final class Launcher {
         Log.info(Messages.tr("launch.handoff", mainClassName));
         return MethodHandles.publicLookup().findStatic(mainClass, "main",
                 MethodType.methodType(void.class, String[].class));
+    }
+
+    private static Map<ModCandidate, Path> remapMods(Path gameDir, List<ModCandidate> mods, MappingStore.Loaded maps)
+            throws NeFobricStartupException {
+        Map<ModCandidate, Path> result = new LinkedHashMap<>();
+        if (maps.isIdentity()) {
+            return result;
+        }
+        String runtime = maps.mappings().runtimeNamespace();
+        Map<Path, Path> done = new HashMap<>();
+        List<String> problems = new ArrayList<>();
+        for (ModCandidate m : mods) {
+            String ns = m.sourceNamespace();
+            if (ns == null || ns.equals(runtime) || m.origin() == null) {
+                continue;
+            }
+            if (!maps.data().hasNamespace(ns)) {
+                problems.add(Messages.tr("remap.failed", m.describe(), "unknown namespace " + ns));
+                continue;
+            }
+            Path out = done.get(m.origin());
+            if (out == null) {
+                try {
+                    out = RemapCache.mod(gameDir, m.origin(), ns, maps);
+                } catch (Exception e) {
+                    problems.add(Messages.tr("remap.failed", m.describe(), e));
+                    continue;
+                }
+                done.put(m.origin(), out);
+            }
+            result.put(m, out);
+        }
+        if (!problems.isEmpty()) {
+            throw new NeFobricStartupException(problems);
+        }
+        return result;
     }
 
     private static List<EcosystemAdapter> loadAdapters() {

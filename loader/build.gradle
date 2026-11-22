@@ -3,6 +3,10 @@ plugins {
 }
 
 dependencies {
+    // 不重定位：Mixin 的公开接口和模组的 Mixin 插件直接用 org.objectweb.asm 的类型
     api "org.ow2.asm:asm:${asm_version}"
     api "org.ow2.asm:asm-tree:${asm_version}"
+    api "org.ow2.asm:asm-commons:${asm_version}"
+    api "org.ow2.asm:asm-analysis:${asm_version}"
+    api "org.ow2.asm:asm-util:${asm_version}"
 }
