@@ -111,6 +111,12 @@ public final class ApiProbe {
 
         check("semver", SemanticVersion.parse("1.2.3-beta+x").compareTo((Version) SemanticVersion.parse("1.2.3")) < 0);
 
+        // 不是公开 API，但 fabric-language-kotlin 等模组直接用它找游戏类加载器
+        check("launcher class loader", net.fabricmc.loader.impl.launch.FabricLauncherBase.getLauncher()
+                .getTargetClassLoader() == ApiProbe.class.getClassLoader());
+        check("launcher namespace", net.fabricmc.loader.impl.launch.FabricLauncherBase.getLauncher()
+                .getTargetNamespace().equals(mr.getCurrentRuntimeNamespace()));
+
         // @Environment 剥离的检查等核心的 TransformerRegistry 合并、剥离变换器挂上之后再加回来
     }
 
