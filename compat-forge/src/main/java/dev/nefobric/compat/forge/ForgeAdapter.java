@@ -120,9 +120,6 @@ public final class ForgeAdapter implements EcosystemAdapter {
                 && mod.extra(ModsTomlParser.EXTRA_MOD_CLASS, String.class) == null) {
             out.add(Messages.tr("forge.noModClass", mod.describe(), mod.id()));
         }
-        if (!mod.mixinConfigs().isEmpty()) {
-            out.add(Messages.tr("compat.mixinsIgnored", mod.describe(), String.join(", ", mod.mixinConfigs())));
-        }
         if (!mod.accessTransformers().isEmpty()) {
             out.add(Messages.tr("forge.atIgnored", mod.describe()));
         }

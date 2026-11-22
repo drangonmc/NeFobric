@@ -104,6 +104,7 @@ class LaunchIT {
         r.assertInOrder(
                 "NeFobric 0.0.1-alpha is starting Minecraft 1.20.1 (client)",
                 "Loading 3 mod(s) (Fabric 1, Forge 1, NeoForge 1)",
+                "Mixin 0.8.7 ready: 2 configs from 2 mods",
                 "[fabric_hello] preLaunch",
                 "Installed the game hook in net.minecraft.client.main.Main",
                 "[FakeGame] client bootstrap",
@@ -113,6 +114,8 @@ class LaunchIT {
                 "[fabric_hello] client: client entrypoint ran",
                 "Initialized 3 mod(s)",
                 "[FakeGame] constructing game",
+                "[forge_hello] mixin: FakeMinecraft constructed",
+                "[fabric_hello] mixin: before FakeMinecraft.run",
                 "[FakeGame] client running, loader=NeFobric");
         // 钩子在 “Render thread” 上触发，模组彼此可见，游戏类由 NeFobric 加载
         assertTrue(r.output().contains("thread=Render thread, env=CLIENT, forge_hello=true, neoforge_hello=true,"
@@ -138,16 +141,20 @@ class LaunchIT {
         r.assertInOrder(
                 "NeFobric 0.0.1-alpha is starting Minecraft 1.20.1 (dedicated server)",
                 "Extracted 2 file(s) from server.jar",
+                "Mixin 0.8.7 ready: 2 configs from 2 mods",
                 "[fabric_hello] preLaunch",
                 "Installed the game hook in net.minecraft.server.Main",
+                "[fabric_hello] mixin: server main",
                 "[FakeGame] server bootstrap, nogui=true",
                 "[forge_hello] constructed",
                 "[neoforge_hello] constructed",
                 "[fabric_hello] main: Hello from Fabric!",
                 "[fabric_hello] server: server entrypoint ran",
-                "[FakeGame] server running, properties=server.properties, library=fake-library-1.0, loader=NeFobric");
+                "[FakeGame] server running, properties=server.properties, library=fake-library-1.0, loader=NeFobric",
+                "[forge_hello] mixin: server main returning");
         assertTrue(r.output().contains("env=SERVER"), r.output());
         assertFalse(r.output().contains("client entrypoint ran"), r.output());
+        assertFalse(r.output().contains("FakeMinecraft"), "client mixins must not apply on the server: " + r.output());
         assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(Files.isRegularFile(serverDir.resolve("versions/1.20.1/server-1.20.1.jar")));
         assertTrue(Files.isRegularFile(serverDir.resolve("libraries/org/example/fake-library/1.0/fake-library-1.0.jar")));

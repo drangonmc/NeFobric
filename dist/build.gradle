@@ -28,6 +28,11 @@ shadowJar {
     exclude 'META-INF/maven/**'
     exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
     exclude 'META-INF/LICENSE*', 'META-INF/NOTICE*'
+    // Mixin、MixinExtras 自带的注解处理器和 ModLauncher 入口：运行时用不到
+    exclude 'org/spongepowered/tools/**', 'com/llamalad7/mixinextras/ap/**'
+    exclude 'META-INF/services/javax.annotation.processing.Processor'
+    exclude 'META-INF/services/org.spongepowered.tools.obfuscation.service.IObfuscationService'
+    exclude 'META-INF/services/cpw.mods.modlauncher.*'
     manifest {
         attributes(
                 'Main-Class': 'dev.nefobric.loader.launch.ServerMain',
@@ -35,6 +40,10 @@ shadowJar {
                 'Implementation-Version': project.version,
                 'Implementation-Vendor': 'NeFobric'
         )
+        // 合并进来的 ASM 没有了自己的 MANIFEST。Mixin 靠 org.objectweb.asm 包的 Implementation-Version 判断 ASM 的
+        // 次版本号，读不到时当成 9.0，于是拒绝 JAVA_17 兼容等级（几乎所有 1.20.1 模组都写这个）
+        attributes(['Implementation-Title': 'ASM', 'Implementation-Version': project.property('asm_version')],
+                'org/objectweb/asm/')
     }
 }
 

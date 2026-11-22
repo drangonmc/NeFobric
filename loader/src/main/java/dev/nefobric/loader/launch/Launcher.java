@@ -10,6 +10,7 @@ import dev.nefobric.loader.mapping.MappingStore;
 import dev.nefobric.loader.mapping.RemapCache;
 import dev.nefobric.loader.metadata.Ecosystem;
 import dev.nefobric.loader.metadata.ModCandidate;
+import dev.nefobric.loader.mixin.MixinSetup;
 import dev.nefobric.loader.resolve.ModResolver;
 import dev.nefobric.loader.spi.EcosystemAdapter;
 import dev.nefobric.loader.spi.LoadStage;
@@ -17,6 +18,7 @@ import dev.nefobric.loader.spi.ModLoadingException;
 import dev.nefobric.loader.util.Log;
 import dev.nefobric.loader.util.Messages;
 
+import java.io.IOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -38,7 +40,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 启动流程：找游戏 → 发现模组 → 解析依赖 → 建类加载器并装上游戏钩子 → preLaunch → 移交原版主类。
+ * 启动流程：找游戏 → 发现模组 → 解析依赖 → 建类加载器并装上游戏钩子和各兼容层的变换器 → 启动 Mixin → preLaunch
+ * → 移交原版主类。
  * 模组的其余初始化在游戏钩子触发时进行（见 {@link NeFobricLoader#onGameStart()}）。
  */
 public final class Launcher {
@@ -143,6 +146,7 @@ public final class Launcher {
         }
         List<Path> ownJars = new ArrayList<>();
         ownJars.add(game.gameJar());
+        ownJars.addAll(runtimeLibraries(adapters, game, args.gameDir().resolve(".nefobric").resolve("cache")));
         resolved.mods().stream().map(m -> runtimePaths.getOrDefault(m, m.origin())).distinct().forEach(ownJars::add);
         NeFobricClassLoader classLoader = new NeFobricClassLoader(ownJars, parentLoader(game), loaderOwned);
         GameEntryPatch entryPatch = new GameEntryPatch(env);
@@ -150,8 +154,14 @@ public final class Launcher {
         NeFobricLoader loader = NeFobricLoader.initialize(args, game, adapters, resolved.mods(), resolved.byId(),
                 classLoader, maps.mappings(), runtimePaths);
         Thread.currentThread().setContextClassLoader(classLoader);
+        for (EcosystemAdapter a : adapters) {
+            a.registerTransformers(classLoader.transformers(), loader, resolved.mods().stream().filter(a::owns).toList());
+        }
 
-        // 6. preLaunch，然后加载（并修改）原版主类
+        // 6. Mixin：注册各模组的配置，就绪后挂到类变换流水线的最后
+        startMixin(env, classLoader, adapters, resolved.mods());
+
+        // 7. preLaunch，然后加载（并修改）原版主类
         loader.runStage(LoadStage.PRE_LAUNCH);
         String mainClassName = entryPatch.targetClass();
         Class<?> mainClass = Class.forName(mainClassName, false, classLoader);
@@ -161,6 +171,42 @@ public final class Launcher {
         Log.info(Messages.tr("launch.handoff", mainClassName));
         return MethodHandles.publicLookup().findStatic(mainClass, "main",
                 MethodType.methodType(void.class, String[].class));
+    }
+
+    private static List<Path> runtimeLibraries(List<EcosystemAdapter> adapters, GameInstall game, Path cacheDir)
+            throws NeFobricStartupException {
+        List<Path> out = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
+        for (EcosystemAdapter a : adapters) {
+            try {
+                out.addAll(a.runtimeLibraries(game, cacheDir));
+            } catch (IOException e) {
+                problems.add(Messages.tr("launch.runtimeLibraryFailed", a.displayName(), e));
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new NeFobricStartupException(problems);
+        }
+        return out;
+    }
+
+    private static void startMixin(Env env, NeFobricClassLoader classLoader, List<EcosystemAdapter> adapters,
+                                   List<ModCandidate> mods) throws NeFobricStartupException {
+        List<MixinSetup.ConfigRequest> requests = new ArrayList<>();
+        for (ModCandidate m : mods) {
+            for (EcosystemAdapter a : adapters) {
+                if (a.owns(m)) {
+                    for (String config : a.mixinConfigs(m, env)) {
+                        requests.add(new MixinSetup.ConfigRequest(config, m, a));
+                    }
+                    break;
+                }
+            }
+        }
+        List<String> problems = MixinSetup.start(classLoader, env, requests);
+        if (!problems.isEmpty()) {
+            throw new NeFobricStartupException(problems);
+        }
     }
 
     private static Map<ModCandidate, Path> remapMods(Path gameDir, List<ModCandidate> mods, MappingStore.Loaded maps)

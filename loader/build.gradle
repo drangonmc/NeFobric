@@ -9,4 +9,36 @@ dependencies {
     api "org.ow2.asm:asm-commons:${asm_version}"
     api "org.ow2.asm:asm-analysis:${asm_version}"
     api "org.ow2.asm:asm-util:${asm_version}"
+    // Mixin 由加载器统一提供，Fabric 和 Forge 系模组共用一份。Fabric 的 Mixin 分支自己带了 guava、gson（已重定位），
+    // pom 里列的依赖不需要
+    api("net.fabricmc:sponge-mixin:${mixin_version}") {
+        transitive = false
+    }
+    api "io.github.llamalad7:mixinextras-common:${mixinextras_version}"
+}
+
+// Mixin 集成测试用的模组 jar：目标类、Mixin 类、插件和配置。单独编译打包，不放在测试类路径上，
+// 由测试里的 NeFobricClassLoader 加载
+sourceSets {
+    mixinFixture
+}
+
+dependencies {
+    mixinFixtureCompileOnly("net.fabricmc:sponge-mixin:${mixin_version}") {
+        transitive = false
+    }
+    mixinFixtureCompileOnly "io.github.llamalad7:mixinextras-common:${mixinextras_version}"
+    mixinFixtureCompileOnly "org.ow2.asm:asm-tree:${asm_version}"
+}
+
+def mixinFixtureJar = tasks.register('mixinFixtureJar', Jar) {
+    from sourceSets.mixinFixture.output
+    archiveFileName = 'mixin-fixture.jar'
+    destinationDirectory = layout.buildDirectory.dir('fixtures')
+}
+
+tasks.named('test', Test) {
+    inputs.files(mixinFixtureJar)
+    def fixturePath = mixinFixtureJar.flatMap { it.archiveFile }.map { it.asFile.absolutePath }
+    jvmArgumentProviders.add({ ["-Dnefobric.test.mixinFixture=${fixturePath.get()}"] } as CommandLineArgumentProvider)
 }

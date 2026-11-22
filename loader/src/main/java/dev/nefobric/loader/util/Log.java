@@ -89,9 +89,14 @@ public final class Log {
         log(Level.ERROR, message, t);
     }
 
-    public static synchronized void log(Level level, String message, Throwable t) {
+    public static void log(Level level, String message, Throwable t) {
+        log(level, "NeFobric", message, t);
+    }
+
+    /** {@code source} 是方括号里的来源名，例如 Mixin 的日志名 “mixin”。 */
+    public static synchronized void log(Level level, String source, String message, Throwable t) {
         String prefix = "[" + LocalTime.now().format(TIME) + "] [" + Thread.currentThread().getName()
-                + "/" + level + "] [NeFobric]: ";
+                + "/" + level + "] [" + source + "]: ";
         StringBuilder sb = new StringBuilder();
         for (String line : message.split("\\R", -1)) {
             sb.append(prefix).append(line).append(System.lineSeparator());

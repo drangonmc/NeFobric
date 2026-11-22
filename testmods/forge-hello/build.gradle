@@ -1,14 +1,17 @@
-// 最简单的 Forge 测试模组：只有一个 @Mod 主类，构造时打印日志。
+// 最简单的 Forge 测试模组：一个 @Mod 主类，构造时打印日志；MANIFEST 里声明一个 Mixin 配置。
 // 它同样可以直接放进真正的 Forge 1.20.1 里运行。
 version = '1.0.0'
 
 dependencies {
+    compileOnly("net.fabricmc:sponge-mixin:${mixin_version}") {
+        transitive = false
+    }
     compileOnly project(':compat-forge')
 }
 
 jar {
     archiveBaseName = 'forge-hello'
     manifest {
-        attributes('Implementation-Version': project.version)
+        attributes('Implementation-Version': project.version, 'MixinConfigs': 'forge_hello.mixins.json')
     }
 }
