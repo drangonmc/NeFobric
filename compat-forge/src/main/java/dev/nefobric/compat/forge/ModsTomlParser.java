@@ -4,6 +4,7 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.electronwill.nightconfig.core.Config;
 import com.electronwill.nightconfig.core.io.ParsingException;
 import com.electronwill.nightconfig.toml.TomlParser;
+import dev.nefobric.compat.forge.neoforge.NeoForgeIdentity;
 import dev.nefobric.loader.metadata.Dependency;
 import dev.nefobric.loader.metadata.Ecosystem;
 import dev.nefobric.loader.metadata.ModCandidate;
@@ -18,11 +19,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
  * 解析 Forge 47 / NeoForge 47.1 的 {@code META-INF/mods.toml}。一个文件可以声明多个模组；
- * 只要有任何一条依赖指向 {@code neoforge}，就把这个文件里的模组都标成 NeoForge 模组。
+ * 只要有任何一条依赖指向 {@code neoforge}，就把这个文件里的模组都标成 NeoForge 模组（只影响显示，
+ * 两家走同一套运行时；1.20.1 的 NeoForge 模组大多只依赖 {@code forge}，所以多数会显示为 Forge）。
+ *
+ * <p>对内置虚拟模组 forge / javafml / lowcodefml 的依赖会同时接受 NeoForge 1.20.1 一侧的版本号，
+ * 强制依赖 1.20.2 以后才有的 neoforge 的 jar 会被跳过，见 {@link NeoForgeIdentity}。</p>
  */
 public final class ModsTomlParser {
     public static final String PATH = "META-INF/mods.toml";
@@ -66,6 +72,10 @@ public final class ModsTomlParser {
         }
         Object depsRoot = cfg.get("dependencies");
         Config deps = depsRoot instanceof Config c ? c : null;
+        Optional<String> modernNeo = modernNeoForgeRequirement(deps);
+        if (modernNeo.isPresent()) {
+            throw ModMetadataException.skip(Messages.tr("forge.modernNeoForge", modernNeo.get()));
+        }
         boolean neo = mentionsNeoForge(deps);
 
         List<String> mixins = new ArrayList<>(jar.manifestMixins());
@@ -96,7 +106,9 @@ public final class ModsTomlParser {
                 b.extra(EXTRA_MOD_CLASS, modClass);
             }
             if (!loaderVersion.isBlank()) {
-                b.dependency(Dependency.of(modLoader, Dependency.Kind.REQUIRED, range(modId, modLoader, loaderVersion)));
+                b.dependency(Dependency.of(modLoader, Dependency.Kind.REQUIRED,
+                        NeoForgeIdentity.widen(modLoader, Dependency.Kind.REQUIRED, reportedVersion(modLoader),
+                                range(modId, modLoader, loaderVersion))));
             }
             if (deps != null) {
                 Object list = deps.get(List.of(modId));
@@ -144,7 +156,8 @@ public final class ModsTomlParser {
             Object mandatory = d.get("mandatory");
             kind = Boolean.FALSE.equals(mandatory) ? Dependency.Kind.OPTIONAL : Dependency.Kind.REQUIRED;
         }
-        VersionPredicate predicate = range(owner, target, string(d, "versionRange", ""));
+        VersionPredicate predicate = NeoForgeIdentity.widen(target, kind, reportedVersion(target),
+                range(owner, target, string(d, "versionRange", "")));
         Dependency.Ordering ordering;
         switch (string(d, "ordering", "NONE").toUpperCase(Locale.ROOT)) {
             case "BEFORE":
@@ -178,6 +191,47 @@ public final class ModsTomlParser {
         } catch (IllegalArgumentException e) {
             throw new ModMetadataException(Messages.tr("forge.badDependency", owner, target + " versionRange=" + spec), e);
         }
+    }
+
+    /** 内置虚拟模组对外报告的版本，用来判断依赖检查时是否可以换成 NeoForge 一侧的版本号。 */
+    private static String reportedVersion(String target) {
+        switch (target) {
+            case "forge":
+                return ForgeAdapter.EMULATED_FORGE_VERSION;
+            case "javafml":
+            case "lowcodefml":
+                return ForgeAdapter.FML_LANGUAGE_VERSION;
+            default:
+                return null;
+        }
+    }
+
+    /** 强制依赖 neoforge、而且区间只有 1.20.2 以后的 NeoForge 才能满足时，返回这个区间。 */
+    private static Optional<String> modernNeoForgeRequirement(Config deps) {
+        if (deps == null) {
+            return Optional.empty();
+        }
+        for (Object value : deps.valueMap().values()) {
+            for (Config d : tables(value)) {
+                if (!"neoforge".equals(d.get("modId")) || !isMandatory(d)) {
+                    continue;
+                }
+                Optional<String> r = NeoForgeIdentity.modernNeoForgeRange(string(d, "versionRange", ""));
+                if (r.isPresent()) {
+                    return r;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** 与 {@link #parseDependency} 的规则一致：没写 mandatory / type 时按必需处理。 */
+    private static boolean isMandatory(Config d) {
+        Object type = d.get("type");
+        if (type instanceof String s) {
+            return s.equalsIgnoreCase("required");
+        }
+        return !Boolean.FALSE.equals(d.get("mandatory"));
     }
 
     private static boolean mentionsNeoForge(Config deps) {
