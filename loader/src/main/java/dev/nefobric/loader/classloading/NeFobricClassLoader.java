@@ -1,5 +1,7 @@
 package dev.nefobric.loader.classloading;
 
+import dev.nefobric.loader.transform.TransformPipeline;
+import dev.nefobric.loader.transform.TransformerPhase;
 import dev.nefobric.loader.util.Log;
 
 import java.io.IOException;
@@ -27,8 +29,8 @@ import java.util.jar.Manifest;
 /**
  * 游戏和所有模组共用的平铺类加载器。
  *
- * <p>游戏 jar 和模组 jar 里的类由它自己定义（子优先），这样每个类在定义前都会经过 {@link ClassTransformer}
- * 流水线。JDK、游戏依赖库（LWJGL、netty 等）以及加载器自己（{@code dev.nefobric.loader/compat/shadow} 和兼容层提供的 API 类）
+ * <p>游戏 jar、兼容层运行库和模组 jar 里的类由它自己定义（子优先），这样每个类在定义前都会经过
+ * {@link TransformPipeline}（入口钩子、按端剥离、AW/AT、Mixin）。JDK、游戏依赖库（LWJGL、netty 等）以及加载器自己（{@code dev.nefobric.loader/compat/shadow} 和兼容层提供的 API 类）
  * 交给父加载器，保证加载器和模组看到的是同一份 API 类。
  */
 public final class NeFobricClassLoader extends URLClassLoader {
@@ -48,7 +50,7 @@ public final class NeFobricClassLoader extends URLClassLoader {
 
     private final List<String> parentPackages = new CopyOnWriteArrayList<>();
     private final List<String> parentClasses = new CopyOnWriteArrayList<>();
-    private final List<ClassTransformer> transformers = new CopyOnWriteArrayList<>();
+    private final TransformPipeline pipeline = new TransformPipeline();
     private final Map<String, CodeSource> codeSources = new ConcurrentHashMap<>();
     private final AtomicInteger definedCount = new AtomicInteger();
 
@@ -76,8 +78,59 @@ public final class NeFobricClassLoader extends URLClassLoader {
         return urls;
     }
 
+    /** 等同于 {@code transformers().add(TransformerPhase.GAME_PATCH, transformer)}。 */
     public void addTransformer(ClassTransformer transformer) {
-        transformers.add(transformer);
+        pipeline.add(TransformerPhase.GAME_PATCH, transformer);
+    }
+
+    /** 这个类加载器的类变换流水线。 */
+    public TransformPipeline transformers() {
+        return pipeline;
+    }
+
+    /** 这个类加载器是否已经定义过这个类（Mixin 用它提示“目标类在 Mixin 就绪之前就被加载了”）。 */
+    public boolean isClassLoaded(String name) {
+        return findLoadedClass(name) != null;
+    }
+
+    /**
+     * 类文件的原始字节：游戏、运行库和模组里的类从这里的 jar 读，其余（JDK、游戏依赖库、加载器自己的类）从父加载器读。
+     * 找不到时返回 {@code null}。
+     */
+    public byte[] getRawClassBytes(String name) throws IOException {
+        URL url = locate(name);
+        if (url == null) {
+            return null;
+        }
+        try (InputStream in = url.openStream()) {
+            return in.readAllBytes();
+        }
+    }
+
+    /**
+     * Mixin 之前各阶段（入口钩子、按端剥离、AW/AT）处理过的字节码，Mixin 读类信息时用它。
+     * 不归这里定义的类不做变换。找不到时返回 {@code null}。
+     */
+    public byte[] getPreMixinClassBytes(String name) throws IOException {
+        URL own = isLoaderOwned(name) ? null : findResource(classFile(name));
+        if (own == null) {
+            return getRawClassBytes(name);
+        }
+        byte[] bytes;
+        try (InputStream in = own.openStream()) {
+            bytes = in.readAllBytes();
+        }
+        return pipeline.transformBeforeMixin(name, bytes);
+    }
+
+    private URL locate(String name) {
+        String path = classFile(name);
+        URL url = isLoaderOwned(name) ? null : findResource(path);
+        return url != null ? url : getParent().getResource(path);
+    }
+
+    private static String classFile(String name) {
+        return name.replace('.', '/') + ".class";
     }
 
     /** 之后（例如 Jar-in-Jar）再加入的 jar。 */
@@ -121,6 +174,10 @@ public final class NeFobricClassLoader extends URLClassLoader {
                     // javax.* 不全在 JDK 里（例如 jsr305 的 javax.annotation），父加载器没有时再看模组 jar
                     c = name.startsWith("javax.") ? defineFromOwnJars(name) : null;
                     if (c == null) {
+                        // Mixin 运行时生成的合成类（例如 org.spongepowered.asm.synthetic.args.Args$1）哪里都没有
+                        c = defineGenerated(name);
+                    }
+                    if (c == null) {
                         throw e;
                     }
                 }
@@ -136,14 +193,16 @@ public final class NeFobricClassLoader extends URLClassLoader {
     protected Class<?> findClass(String name) throws ClassNotFoundException {
         Class<?> c = isLoaderOwned(name) ? null : defineFromOwnJars(name);
         if (c == null) {
+            c = defineGenerated(name);
+        }
+        if (c == null) {
             throw new ClassNotFoundException(name);
         }
         return c;
     }
 
     private Class<?> defineFromOwnJars(String name) throws ClassNotFoundException {
-        String path = name.replace('.', '/') + ".class";
-        URL url = findResource(path);
+        URL url = findResource(classFile(name));
         if (url == null) {
             return null;
         }
@@ -160,12 +219,21 @@ public final class NeFobricClassLoader extends URLClassLoader {
         } catch (IOException e) {
             throw new ClassNotFoundException(name, e);
         }
-        for (ClassTransformer t : transformers) {
-            bytes = t.transform(name, bytes);
-        }
+        bytes = pipeline.transform(name, bytes);
         CodeSource cs = codeSourceFor(url);
         definePackageFor(name, manifest, cs.getLocation());
         Class<?> c = defineClass(name, bytes, 0, bytes.length, cs);
+        definedCount.incrementAndGet();
+        return c;
+    }
+
+    private Class<?> defineGenerated(String name) {
+        byte[] bytes = pipeline.generate(name);
+        if (bytes == null) {
+            return null;
+        }
+        definePackageFor(name, null, null);
+        Class<?> c = defineClass(name, bytes, 0, bytes.length);
         definedCount.incrementAndGet();
         return c;
     }

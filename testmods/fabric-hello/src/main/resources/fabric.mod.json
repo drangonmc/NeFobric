@@ -19,6 +19,7 @@
       "dev.nefobric.testmods.fabric.ApiProbe::FIELD"
     ]
   },
+  "mixins": ["fabric_hello.mixins.json"],
   "custom": {
     "fabric_hello:probe": {"answer": 42, "list": ["a"]}
   },

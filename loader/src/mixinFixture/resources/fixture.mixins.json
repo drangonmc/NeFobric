@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "fixture.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "plugin": "fixture.FixturePlugin",
+  "mixins": ["GreeterMixin", "GreeterAccessor"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
