@@ -45,8 +45,11 @@ dependencies {
 
     devtoolsImplementation "org.ow2.asm:asm:${asm_version}"
     devtoolsImplementation "org.ow2.asm:asm-tree:${asm_version}"
+    devtoolsImplementation "org.ow2.asm:asm-commons:${asm_version}"
 
     testImplementation sourceSets.runtime.output
+    testImplementation sourceSets.devtools.output
+    testImplementation "org.ow2.asm:asm-commons:${asm_version}"
     testRuntimeOnly "org.apache.logging.log4j:log4j-core:2.19.0"
 }
 
