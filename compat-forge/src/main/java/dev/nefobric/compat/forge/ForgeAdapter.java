@@ -3,6 +3,8 @@ package dev.nefobric.compat.forge;
 import dev.nefobric.compat.forge.transform.AccessTransformerApplier;
 import dev.nefobric.compat.forge.transform.AccessTransformers;
 import dev.nefobric.compat.forge.transform.ActiveAccessTransformers;
+import dev.nefobric.compat.forge.transform.EnumExtender;
+import dev.nefobric.compat.forge.transform.ExtensibleVanillaEnums;
 import dev.nefobric.compat.forge.transform.LaunchPluginBridge;
 import dev.nefobric.compat.forge.transform.OnlyInStripper;
 import dev.nefobric.loader.Env;
@@ -162,12 +164,15 @@ public final class ForgeAdapter implements EcosystemAdapter {
         if (mods.isEmpty()) {
             return;
         }
+        registry.add(TransformerPhase.GAME_PATCH, new ExtensibleVanillaEnums());
         registry.add(TransformerPhase.STRIP, new OnlyInStripper(loader.env() == Env.CLIENT ? "CLIENT" : "DEDICATED_SERVER"));
         List<ActiveAccessTransformers.Source> sources = accessTransformerSources(mods);
         AccessTransformerApplier applier = new AccessTransformerApplier(ActiveAccessTransformers.build(sources));
         ActiveAccessTransformers.install(sources, applier);
         registry.add(TransformerPhase.ACCESS, applier);
-        // ModLauncher 的启动插件（模组通过 cpw.mods.modlauncher.Launcher 注册）排在 AT 之后
+        // 和 Forge 一样，枚举扩展看到的是 AT 改过的类（accesstransformer → runtime_enum_extender → 模组的启动插件）
+        registry.add(TransformerPhase.ACCESS, new EnumExtender());
+        // ModLauncher 的启动插件（模组通过 cpw.mods.modlauncher.Launcher 注册）排在 AT 和枚举扩展之后
         registry.add(TransformerPhase.ACCESS, new LaunchPluginBridge());
     }
 
