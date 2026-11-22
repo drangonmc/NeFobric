@@ -5,6 +5,7 @@ import dev.nefobric.loader.classloading.NeFobricClassLoader;
 import dev.nefobric.loader.launch.CrashReporter;
 import dev.nefobric.loader.launch.GameInstall;
 import dev.nefobric.loader.launch.LaunchArgs;
+import dev.nefobric.loader.mapping.Mappings;
 import dev.nefobric.loader.metadata.ModCandidate;
 import dev.nefobric.loader.spi.EcosystemAdapter;
 import dev.nefobric.loader.spi.LoadStage;
@@ -33,28 +34,34 @@ public final class NeFobricLoader {
     private final List<ModCandidate> mods;
     private final Map<String, ModCandidate> modsById;
     private final NeFobricClassLoader classLoader;
+    private final Mappings mappings;
+    private final Map<ModCandidate, Path> runtimePaths;
+    private volatile Object gameInstance;
     private final Set<LoadStage> completed = EnumSet.noneOf(LoadStage.class);
     private boolean gameStarted;
 
     private NeFobricLoader(LaunchArgs args, GameInstall game, List<EcosystemAdapter> adapters,
                            List<ModCandidate> mods, Map<String, ModCandidate> modsById,
-                           NeFobricClassLoader classLoader) {
+                           NeFobricClassLoader classLoader, Mappings mappings, Map<ModCandidate, Path> runtimePaths) {
         this.args = args;
         this.game = game;
         this.adapters = List.copyOf(adapters);
         this.mods = List.copyOf(mods);
         this.modsById = Map.copyOf(modsById);
         this.classLoader = classLoader;
+        this.mappings = mappings;
+        this.runtimePaths = Map.copyOf(runtimePaths);
     }
 
     public static synchronized NeFobricLoader initialize(LaunchArgs args, GameInstall game,
                                                          List<EcosystemAdapter> adapters, List<ModCandidate> mods,
                                                          Map<String, ModCandidate> modsById,
-                                                         NeFobricClassLoader classLoader) {
+                                                         NeFobricClassLoader classLoader, Mappings mappings,
+                                                         Map<ModCandidate, Path> runtimePaths) {
         if (instance != null) {
             throw new IllegalStateException("NeFobric is already initialized");
         }
-        instance = new NeFobricLoader(args, game, adapters, mods, modsById, classLoader);
+        instance = new NeFobricLoader(args, game, adapters, mods, modsById, classLoader, mappings, runtimePaths);
         return instance;
     }
 
@@ -109,6 +116,31 @@ public final class NeFobricLoader {
 
     public NeFobricClassLoader classLoader() {
         return classLoader;
+    }
+
+    /** 名字映射；运行时命名空间见 {@link Mappings#runtimeNamespace()}。 */
+    public Mappings mappings() {
+        return mappings;
+    }
+
+    /**
+     * 模组实际加载的 jar：需要重映射的模组（例如 Fabric 模组）是缓存里重映射后的文件，其余就是 {@link ModCandidate#origin()}。
+     */
+    public Path runtimePath(ModCandidate mod) {
+        return runtimePaths.getOrDefault(mod, mod.origin());
+    }
+
+    /**
+     * 游戏对象：客户端是 {@code net.minecraft.client.Minecraft}，专用服务端是 {@code MinecraftServer}。
+     * 游戏钩子触发之前为 {@code null}。
+     */
+    public Object gameInstance() {
+        return gameInstance;
+    }
+
+    /** 由游戏钩子调用。 */
+    public void setGameInstance(Object instance) {
+        this.gameInstance = instance;
     }
 
     public boolean isDevelopmentEnvironment() {

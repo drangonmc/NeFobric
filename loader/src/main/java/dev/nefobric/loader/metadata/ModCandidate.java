@@ -27,6 +27,7 @@ public final class ModCandidate {
     private final List<String> nestedJars;
     private final List<String> mixinConfigs;
     private final List<String> accessTransformers;
+    private final String sourceNamespace;
     private final Map<String, Object> extras;
 
     private ModCandidate(Builder b) {
@@ -44,6 +45,7 @@ public final class ModCandidate {
         this.nestedJars = List.copyOf(b.nestedJars);
         this.mixinConfigs = List.copyOf(b.mixinConfigs);
         this.accessTransformers = List.copyOf(b.accessTransformers);
+        this.sourceNamespace = b.sourceNamespace;
         this.extras = Collections.unmodifiableMap(new LinkedHashMap<>(b.extras));
     }
 
@@ -108,6 +110,14 @@ public final class ModCandidate {
         return accessTransformers;
     }
 
+    /**
+     * 模组字节码用的命名空间，例如 Fabric 模组是 {@code intermediary}。{@code null} 表示已经是运行时命名空间
+     * （Forge 系模组），不需要重映射。见 {@link dev.nefobric.loader.mapping.Mappings}。
+     */
+    public String sourceNamespace() {
+        return sourceNamespace;
+    }
+
     /** 兼容层自己的附加数据，例如 Forge 系模组的 {@code @Mod} 类名。 */
     public <T> T extra(String key, Class<T> type) {
         Object value = extras.get(key);
@@ -141,6 +151,7 @@ public final class ModCandidate {
         private final List<String> nestedJars = new ArrayList<>();
         private final List<String> mixinConfigs = new ArrayList<>();
         private final List<String> accessTransformers = new ArrayList<>();
+        private String sourceNamespace;
         private final Map<String, Object> extras = new LinkedHashMap<>();
 
         private Builder(String id, String version, Ecosystem ecosystem) {
@@ -191,6 +202,12 @@ public final class ModCandidate {
 
         public Builder accessTransformer(String path) {
             this.accessTransformers.add(path);
+            return this;
+        }
+
+        /** 见 {@link ModCandidate#sourceNamespace()}。 */
+        public Builder sourceNamespace(String namespace) {
+            this.sourceNamespace = namespace;
             return this;
         }
 

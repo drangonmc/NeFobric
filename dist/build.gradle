@@ -15,11 +15,11 @@ jar {
 }
 
 // 发布用的单一 jar：客户端（启动器版本文件里的 library）和专用服务端（java -jar）共用。
-// 依赖库全部重定位到 dev.nefobric.shadow，避免和游戏自带的 gson 等库冲突。
+// gson 和 night-config 重定位到 dev.nefobric.shadow，避免和游戏自带的版本冲突。
+// ASM 不重定位：Mixin 的公开接口和模组的 Mixin 插件直接用 org.objectweb.asm 的类型，由加载器统一提供（原版不带 ASM）。
 shadowJar {
     archiveBaseName = 'nefobric-loader'
     archiveClassifier = ''
-    relocate 'org.objectweb.asm', 'dev.nefobric.shadow.asm'
     relocate 'com.google.gson', 'dev.nefobric.shadow.gson'
     relocate 'com.electronwill.nightconfig', 'dev.nefobric.shadow.nightconfig'
     mergeServiceFiles()
