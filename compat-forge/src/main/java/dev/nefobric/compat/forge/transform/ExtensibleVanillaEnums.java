@@ -20,11 +20,21 @@ import java.util.Set;
  * {@code (String, int, A, B...)} 加一个 {@code public static E create(String, A, B...)}，方法体只是抛异常，
  * 由 ACCESS 阶段的 {@link EnumExtender} 改写成真正追加常量的代码。这样得到的 create 描述符和 Forge 补丁里的一致。</p>
  *
- * <p>只列出“加上 create 就完整”的枚举。Forge 对其他枚举还加了新的构造器或 init() 里的登记
- * （Rarity 的 UnaryOperator&lt;Style&gt; 版 create、MobCategory.byName、RecipeBookType 的配方书设置、
- * Raid.RaiderType 改 public 并刷新缓存、FireworkRocketItem.Shape 的存档名、EnchantmentCategory、
- * SpawnPlacements.Type、HumanoidModel.ArmPose、BiomeSpecialEffects.GrassColorModifier、ItemDisplayContext，
- * 以及 NeoForge 的 DamageScaling、DeathMessageType、DamageEffects），这些要配合对着原版编译的运行时代码，以后再加。</p>
+ * <p>列出的是只靠原版构造器就能加出 Forge 同样 create 的枚举。还没补齐的地方，要配合对着原版编译的运行时代码
+ * （src/runtimeMc）以后再加：</p>
+ * <ul>
+ *   <li>Rarity 的 {@code create(String, UnaryOperator<Style>)} 和 getStyleModifier；</li>
+ *   <li>MobCategory 的 CODEC：原版是 {@code StringRepresentable.fromEnum(MobCategory::values)}，类初始化时就固定了，
+ *       新加的类别在生物群系等 JSON 里解码不出来。Forge 换成了 {@code IExtensibleEnum.createCodecForExtensibleEnum}
+ *       加 {@code byName}，和 IExtensibleEnum 的 codec 方法一起补；</li>
+ *   <li>其他枚举还要新的构造器或 init() 里的登记：RecipeBookType 的配方书设置、RecipeBookCategories、
+ *       Raid.RaiderType 改 public 并刷新缓存、FireworkRocketItem.Shape 的存档名、SpawnPlacements.Type、
+ *       HumanoidModel.ArmPose、BiomeSpecialEffects.GrassColorModifier、ItemDisplayContext，以及 NeoForge 的
+ *       DamageScaling、DeathMessageType、DamageEffects；</li>
+ *   <li>EnchantmentCategory（模组最常用的 create 之一）：原版是带抽象 canEnchant 的抽象枚举，Forge 加了
+ *       Predicate 字段和新构造器，把 canEnchant 改成非抽象。补它时要在这里同时去掉类的 ACC_ABSTRACT，
+ *       否则 {@link EnumExtender} 不会改写。</li>
+ * </ul>
  */
 public final class ExtensibleVanillaEnums implements ClassTransformer {
     /** 运行时命名（Mojang 类名）下的二进制类名。 */

@@ -1,6 +1,7 @@
 package dev.nefobric.compat.forge.transform;
 
 import dev.nefobric.loader.classloading.ClassTransformer;
+import dev.nefobric.loader.util.Log;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Label;
@@ -32,6 +33,9 @@ import java.util.List;
  * <p>{@code $VALUES} 去掉 final。{@code create} 的参数不对（第一个不是 String、返回类型不是这个枚举、没有对应的
  * 构造器）时和 Forge 一样直接报错，类加载失败。原版枚举的 {@code create} 方法由 {@link ExtensibleVanillaEnums}
  * 在 GAME_PATCH 阶段加上。</p>
+ *
+ * <p>限制：这个阶段在 MIXIN 之前，所以用 Mixin 给枚举加上 {@code implements IExtensibleEnum} 和 {@code create}
+ * 的做法这里看不到，那样加的 create 不会被改写。</p>
  */
 public final class EnumExtender implements ClassTransformer {
     static final String MARKER = "net/minecraftforge/common/IExtensibleEnum";
@@ -75,8 +79,11 @@ public final class EnumExtender implements ClassTransformer {
             throw new IllegalStateException("IExtensibleEnum " + self.getClassName() + " has no create method");
         }
         if ((node.access & Opcodes.ACC_ABSTRACT) != 0) {
-            throw new IllegalStateException("IExtensibleEnum " + self.getClassName()
-                    + " is abstract (constants with bodies), it cannot be extended");
+            // 带抽象方法的枚举 new 不出实例。Forge 不检查，照样改写，真调 create 时才报 InstantiationError；
+            // 这里同样让类正常加载，只是不改写，调 create 时得到原方法体的异常（通常是 "Enum not extended"）。
+            Log.warn("IExtensibleEnum " + self.getClassName() + " is abstract (it has abstract methods), "
+                    + "so its create methods cannot add constants and are left as they are");
+            return false;
         }
         FieldNode values = valuesField(node, self);
         for (MethodNode factory : factories) {
