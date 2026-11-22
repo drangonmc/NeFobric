@@ -20,6 +20,10 @@ class AtFixture {
     public void open() {
     }
 
+    public int callsSecret() {
+        return secret(1);
+    }
+
     private static final class Hidden {
         private Hidden() {
         }

@@ -12,8 +12,9 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * ACCESS 阶段：把 {@link AccessTransformers} 应用到被点名的类上。只改访问标志（类、内部类表、字段、方法），
- * 不动字节码，所以直接复用常量池，不重算栈帧。
+ * ACCESS 阶段：把 {@link AccessTransformers} 应用到被点名的类上。改访问标志（类、内部类表、字段、方法）；
+ * 私有实例方法被放开时，把同一个类里对它的 INVOKESPECIAL 改成虚调用（和 Forge 一样）。栈的形状不变，
+ * 所以直接复用常量池，不重算栈帧。
  *
  * <p>类本身在 class 文件里只有 public 和包级两种；更细的访问级别记在内部类表（InnerClasses）里，两处都改。
  * 外部类的内部类表里也有它的条目，一起改，保证反射看到的一致。</p>
@@ -45,22 +46,50 @@ public final class AccessTransformerApplier implements ClassTransformer {
         }
         ClassReader reader = new ClassReader(bytes);
         ClassWriter writer = new ClassWriter(reader, 0);
-        reader.accept(new Visitor(writer, internal, own), 0);
+        reader.accept(new Visitor(writer, internal, own, madeNonPrivate(reader, own)), 0);
         return writer.toByteArray();
+    }
+
+    /**
+     * 原来是 private、被改成非 private 的实例方法（名字加描述符）。同一个类里对它们的调用原来是 INVOKESPECIAL
+     * （不走虚分派），要改成虚调用，子类覆盖这个方法时原版代码才会调到子类的实现。
+     */
+    private static Set<String> madeNonPrivate(ClassReader reader, AccessTransformers.ClassChanges own) {
+        if (own == null) {
+            return Set.of();
+        }
+        Set<String> out = new HashSet<>();
+        reader.accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String n, String descriptor, String signature,
+                                             String[] exceptions) {
+                AccessTransformers.Change c = own.method(n, descriptor);
+                if (c != null && (access & (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC)) == Opcodes.ACC_PRIVATE
+                        && (c.apply(access) & Opcodes.ACC_PRIVATE) == 0 && !n.startsWith("<")) {
+                    out.add(n + descriptor);
+                }
+                return null;
+            }
+        }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        return out;
     }
 
     private final class Visitor extends ClassVisitor {
         private final String name;
         private final AccessTransformers.ClassChanges own;
+        private final Set<String> nowVirtual;
+        private boolean isInterface;
 
-        Visitor(ClassVisitor next, String name, AccessTransformers.ClassChanges own) {
+        Visitor(ClassVisitor next, String name, AccessTransformers.ClassChanges own, Set<String> nowVirtual) {
             super(Opcodes.ASM9, next);
             this.name = name;
             this.own = own;
+            this.nowVirtual = nowVirtual;
         }
 
         @Override
         public void visit(int version, int access, String n, String signature, String superName, String[] interfaces) {
+            isInterface = (access & Opcodes.ACC_INTERFACE) != 0;
             int out = access;
             if (own != null && own.self() != null) {
                 out = classFileAccess(own.self().apply(access));
@@ -85,7 +114,20 @@ public final class AccessTransformerApplier implements ClassTransformer {
         public MethodVisitor visitMethod(int access, String n, String descriptor, String signature,
                                          String[] exceptions) {
             AccessTransformers.Change c = own == null ? null : own.method(n, descriptor);
-            return super.visitMethod(c == null ? access : c.apply(access), n, descriptor, signature, exceptions);
+            MethodVisitor mv = super.visitMethod(c == null ? access : c.apply(access), n, descriptor, signature,
+                    exceptions);
+            if (nowVirtual.isEmpty() || mv == null) {
+                return mv;
+            }
+            return new MethodVisitor(Opcodes.ASM9, mv) {
+                @Override
+                public void visitMethodInsn(int opcode, String owner, String mName, String mDesc, boolean itf) {
+                    if (opcode == Opcodes.INVOKESPECIAL && owner.equals(name) && nowVirtual.contains(mName + mDesc)) {
+                        opcode = isInterface ? Opcodes.INVOKEINTERFACE : Opcodes.INVOKEVIRTUAL;
+                    }
+                    super.visitMethodInsn(opcode, owner, mName, mDesc, itf);
+                }
+            };
         }
     }
 
