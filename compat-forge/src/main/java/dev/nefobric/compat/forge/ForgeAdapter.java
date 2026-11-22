@@ -68,11 +68,17 @@ public final class ForgeAdapter implements EcosystemAdapter {
                             .forEach(manifestMixins::add);
                 }
             }
-            Map<String, String> modClasses = ModAnnotationScanner.scan(jar);
+            ModAnnotationScanner.Result scan = ModAnnotationScanner.scan(jar);
+            Map<String, String> modClasses = scan.modClasses();
             ModsTomlParser.JarInfo info = new ModsTomlParser.JarInfo(jar.path(), implVersion, modClasses,
                     manifestMixins, jar.has("META-INF/accesstransformer.cfg"),
                     jar.has("META-INF/jarjar/metadata.json"));
             List<ModCandidate> mods = ModsTomlParser.parse(toml, info);
+            if (modClasses.isEmpty() && !scan.neoModClasses().isEmpty()) {
+                // 只有 net.neoforged 的 @Mod：NeoForge 20.2 以后的模组，在 1.20.1 上一构造就会缺类
+                throw ModMetadataException.skip(Messages.tr("forge.modernNeoForgeAnnotation",
+                        scan.neoModClasses().values().iterator().next()));
+            }
             for (Map.Entry<String, String> e : modClasses.entrySet()) {
                 if (mods.stream().noneMatch(m -> m.id().equals(e.getKey()))) {
                     Log.warn(Messages.tr("forge.extraModClass", e.getValue(), e.getKey(), jar.fileName()));

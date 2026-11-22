@@ -100,6 +100,62 @@ class ModsTomlParserTest {
         assertEquals(Dependency.Kind.REQUIRED, mods.get(0).dependencies().get(1).kind());
     }
 
+    private static String tomlWith(String loaderVersion, String depModId, String depExtra) {
+        return """
+                modLoader="javafml"
+                loaderVersion="%s"
+                [[mods]]
+                modId="some_mod"
+                version="1.0"
+                [[dependencies.some_mod]]
+                modId="%s"
+                %s
+                """.formatted(loaderVersion, depModId, depExtra);
+    }
+
+    @Test
+    void neoForgeStyleForgeRangeAndLoaderVersionAreAccepted() throws Exception {
+        ModCandidate m = ModsTomlParser.parse(tomlWith("[47.1,)", "forge",
+                "mandatory=true\nversionRange=\"[47.1,47.2)\""), jar(Map.of())).get(0);
+        Dependency loader = m.dependencies().get(0);
+        assertEquals("javafml", loader.modId());
+        assertTrue(loader.predicate().test(ForgeAdapter.FML_LANGUAGE_VERSION));
+        Dependency forge = m.dependencies().get(1);
+        assertEquals("forge", forge.modId());
+        assertTrue(forge.predicate().test(ForgeAdapter.EMULATED_FORGE_VERSION));
+        assertEquals("[47.1,47.2)", forge.predicate().describe());
+    }
+
+    @Test
+    void forgeFamilyRangesFor1202StillFail() throws Exception {
+        ModCandidate m = ModsTomlParser.parse(tomlWith("[48,)", "forge",
+                "mandatory=true\nversionRange=\"[48,)\""), jar(Map.of())).get(0);
+        assertFalse(m.dependencies().get(0).predicate().test(ForgeAdapter.FML_LANGUAGE_VERSION));
+        assertFalse(m.dependencies().get(1).predicate().test(ForgeAdapter.EMULATED_FORGE_VERSION));
+    }
+
+    @Test
+    void mandatoryModernNeoForgeDependencySkipsTheJar() {
+        for (String dep : List.of("mandatory=true\nversionRange=\"[20.4,)\"",
+                "type=\"required\"\nversionRange=\"[21.1.0,)\"",
+                "versionRange=\"[20.2.86,)\"")) {
+            ModMetadataException e = assertThrows(ModMetadataException.class,
+                    () -> ModsTomlParser.parse(tomlWith("[1,)", "neoforge", dep), jar(Map.of())), dep);
+            assertTrue(e.isSkip(), dep);
+        }
+    }
+
+    @Test
+    void optionalOrOldStyleNeoForgeDependencyIsKept() throws Exception {
+        ModCandidate optional = ModsTomlParser.parse(tomlWith("[47,)", "neoforge",
+                "mandatory=false\nversionRange=\"[20.4,)\""), jar(Map.of())).get(0);
+        assertEquals(Ecosystem.NEOFORGE, optional.ecosystem());
+        assertEquals(Dependency.Kind.OPTIONAL, optional.dependencies().get(1).kind());
+        ModCandidate old = ModsTomlParser.parse(tomlWith("[47,)", "neoforge",
+                "mandatory=true\nversionRange=\"[47.1,)\""), jar(Map.of())).get(0);
+        assertEquals(Ecosystem.NEOFORGE, old.ecosystem());
+    }
+
     @Test
     void missingJarVersionFallsBackLikeForge() throws Exception {
         List<ModCandidate> mods = ModsTomlParser.parse(FORGE_TOML,
