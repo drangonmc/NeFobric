@@ -149,7 +149,7 @@ public final class Launcher {
         ownJars.addAll(runtimeLibraries(adapters, game, args.gameDir().resolve(".nefobric").resolve("cache")));
         resolved.mods().stream().map(m -> runtimePaths.getOrDefault(m, m.origin())).distinct().forEach(ownJars::add);
         NeFobricClassLoader classLoader = new NeFobricClassLoader(ownJars, parentLoader(game), loaderOwned);
-        GameEntryPatch entryPatch = new GameEntryPatch(env);
+        GameEntryPatch entryPatch = new GameEntryPatch(env, classLoader::getRawClassBytes);
         classLoader.addTransformer(entryPatch);
         NeFobricLoader loader = NeFobricLoader.initialize(args, game, adapters, resolved.mods(), resolved.byId(),
                 classLoader, maps.mappings(), runtimePaths);

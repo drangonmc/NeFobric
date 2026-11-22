@@ -33,7 +33,8 @@ public class FabricHello implements PreLaunchEntrypoint, ModInitializer, ClientM
 
     @Override
     public void onInitializeClient() {
-        log("client: client entrypoint ran");
+        Object game = FabricLoader.getInstance().getGameInstance();
+        log("client: client entrypoint ran, game=" + (game == null ? "null" : game.getClass().getName()));
     }
 
     @Override
