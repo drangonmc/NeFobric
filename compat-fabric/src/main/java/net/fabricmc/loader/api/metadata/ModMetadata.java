@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 
 /** 模组元数据（fabric.mod.json 的内容）。Forge 系模组和内置模组也有一份，由 NeFobric 从它们的元数据转换而来。 */
 public interface ModMetadata {
-    /** “fabric”、“builtin”，Forge 系模组为 “forge” 或 “neoforge”。 */
+    /** Fabric 模组是 “fabric”；内置模组和 Forge 系模组都是 “builtin”（它们的资源不归 Fabric API 管）。 */
     String getType();
 
     String getId();

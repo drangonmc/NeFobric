@@ -5,12 +5,22 @@
   "name": "Fabric Hello",
   "description": "NeFobric V0.0.1 Alpha 的 Fabric 测试模组。",
   "license": "MIT",
+  "authors": ["NeFobric"],
+  "contact": {"homepage": "https://github.com/drangonmc/NeFobric"},
+  "icon": "assets/fabric_hello/icon.png",
   "environment": "*",
   "entrypoints": {
     "preLaunch": ["dev.nefobric.testmods.fabric.FabricHello"],
     "main": ["dev.nefobric.testmods.fabric.FabricHello"],
     "client": ["dev.nefobric.testmods.fabric.FabricHello"],
-    "server": ["dev.nefobric.testmods.fabric.FabricHello"]
+    "server": ["dev.nefobric.testmods.fabric.FabricHello"],
+    "fabric_hello:probe": [
+      "dev.nefobric.testmods.fabric.ApiProbe::run",
+      "dev.nefobric.testmods.fabric.ApiProbe::FIELD"
+    ]
+  },
+  "custom": {
+    "fabric_hello:probe": {"answer": 42, "list": ["a"]}
   },
   "depends": {
     "fabricloader": ">=0.14.21",

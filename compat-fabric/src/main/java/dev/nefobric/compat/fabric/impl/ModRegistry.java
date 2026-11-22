@@ -104,16 +104,9 @@ final class ModRegistry {
         if (fabric != null) {
             return fabric;
         }
-        String type;
-        if (c.ecosystem() == Ecosystem.BUILTIN) {
-            type = "builtin";
-        } else if (c.ecosystem() == Ecosystem.NEOFORGE) {
-            type = "neoforge";
-        } else if (c.ecosystem() == Ecosystem.FORGE) {
-            type = "forge";
-        } else {
-            type = c.ecosystem().name().toLowerCase(java.util.Locale.ROOT);
-        }
+        // Forge 系模组对 Fabric 模组来说也是 “builtin”：Fabric API 的资源加载器会给每个非 builtin 模组建资源包，
+        // Forge 系模组的资源由 Forge 兼容层负责，不能再被 Fabric API 加一遍（Sinytra Connector 也是这样处理的）。
+        String type = "builtin";
         FabricModMetadata.Builder b = FabricModMetadata.builder(type, c.id(), VersionParser.parseLenient(c.version()))
                 .name(c.name())
                 .environment(toEnvironment(c.environment()));
