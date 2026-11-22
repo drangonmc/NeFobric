@@ -1,10 +1,10 @@
 package dev.nefobric.compat.fabric;
 
-import dev.nefobric.compat.fabric.aw.AccessWidener;
+import dev.nefobric.compat.fabric.aw.AccessWidenerApplier;
 import dev.nefobric.compat.fabric.aw.AccessWidenerReader;
-import dev.nefobric.compat.fabric.aw.AccessWidenerRemapper;
 import dev.nefobric.compat.fabric.entrypoint.EntrypointStorage;
 import dev.nefobric.compat.fabric.impl.FabricLoaderImpl;
+import dev.nefobric.compat.fabric.impl.ModContainerImpl;
 import dev.nefobric.compat.fabric.metadata.FabricModMetadata;
 import dev.nefobric.compat.fabric.transform.EnvironmentStripper;
 import dev.nefobric.loader.Env;
@@ -149,18 +149,28 @@ public final class FabricAdapter implements EcosystemAdapter {
         config.decorate(FabricMixinSupport.compatibilityKey(), FabricMixinSupport.compatibilityFor(meta));
     }
 
-    /** 读出模组的 access widener 并换算到运行时命名空间；没有时返回空。 */
-    public Optional<AccessWidener> accessWidener(ModCandidate mod, Path jarRoot) throws IOException, AccessWidenerReader.FormatException {
-        FabricModMetadata meta = FabricMetadataParser.metadata(mod);
-        if (meta == null || meta.accessWidener() == null) {
-            return Optional.empty();
+    /**
+     * 挂在类变换流水线 ACCESS 阶段的变换器：与 Fabric Loader 的 {@code loadAccessWideners} 一样，读所有 Fabric 模组
+     * （含 Jar-in-Jar 解出来的）在 fabric.mod.json 里声明的 access widener，合并后应用到游戏类。没有任何条目时返回空。
+     */
+    public Optional<AccessWidenerApplier> accessWidenerApplier() {
+        AccessWidenerApplier.Builder builder = AccessWidenerApplier.builder();
+        for (ModContainerImpl container : FabricLoaderImpl.INSTANCE.containers()) {
+            FabricModMetadata meta = FabricMetadataParser.metadata(container.candidate());
+            if (meta == null || meta.accessWidener() == null) {
+                continue;
+            }
+            String id = container.getMetadata().getId();
+            Path path = container.findPath(meta.accessWidener()).orElseThrow(() -> new RuntimeException(
+                    String.format("Missing accessWidener file %s from mod %s", meta.accessWidener(), id)));
+            try {
+                builder.add(AccessWidenerReader.read(Files.readString(path, StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to read accessWidener file from mod " + id, e);
+            }
         }
-        Path file = jarRoot.resolve(meta.accessWidener());
-        if (!Files.isRegularFile(file)) {
-            throw new IOException("Access widener " + meta.accessWidener() + " of mod " + mod.id() + " not found");
-        }
-        AccessWidener aw = AccessWidenerReader.read(Files.readString(file, StandardCharsets.UTF_8));
-        return Optional.of(AccessWidenerRemapper.toRuntime(aw));
+        AccessWidenerApplier applier = builder.build();
+        return applier.isEmpty() ? Optional.empty() : Optional.of(applier);
     }
 
     /** 挂在类变换流水线 STRIP 阶段的变换器。 */
