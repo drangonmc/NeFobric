@@ -41,7 +41,7 @@ public final class FabricAdapter implements EcosystemAdapter {
     public static final String EMULATED_FABRIC_LOADER_VERSION = "0.16.10";
 
     /** Fabric 模组 jar 里类和成员引用使用的命名空间，核心据此把模组重映射到运行时命名空间。 */
-    public static final String MOD_NAMESPACE = "intermediary";
+    public static final String MOD_NAMESPACE = dev.nefobric.loader.mapping.Mappings.INTERMEDIARY;
 
     static final String METADATA = "fabric.mod.json";
 
