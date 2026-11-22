@@ -12,6 +12,11 @@ public class Main {
         return "aw";
     }
 
+    /** 私有：forge-hello 的 access transformer 把它改成 public，用来验证 AT 确实生效。 */
+    private static String atProbe() {
+        return "at";
+    }
+
     public static void main(String[] args) {
         System.out.println("[FakeGame] server bootstrap, nogui=" + java.util.Arrays.asList(args).contains("nogui"));
         Path properties = Paths.get("server.properties");

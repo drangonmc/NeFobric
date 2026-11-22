@@ -35,6 +35,11 @@ public class FakeMinecraft {
         return "aw";
     }
 
+    /** 私有：forge-hello 的 access transformer 把它改成 public，用来验证 AT 确实生效。 */
+    private static String atProbe() {
+        return "at";
+    }
+
     public void run() {
         ClassLoader cl = FakeMinecraft.class.getClassLoader();
         System.out.println("[FakeGame] client running, loader=" + (cl == null ? "bootstrap" : cl.getName()));
