@@ -74,6 +74,11 @@ class McRemapTest {
         Map<String, ClassNode> n = read(named);
         assertEquals(Set.of("net/minecraft/world/Base", "net/minecraft/world/Child", "net/minecraft/world/Factory"),
                 n.keySet());
+        try (ZipFile z = new ZipFile(named.toFile())) {
+            // 目录条目按改名后的包重建，签名文件去掉
+            assertTrue(z.getEntry("net/minecraft/world/").isDirectory());
+            assertEquals(null, z.getEntry("META-INF/MOJANGCS.SF"));
+        }
         ClassNode base = n.get("net/minecraft/world/Base");
         assertEquals("count", base.fields.get(0).name);
         assertEquals(Set.of("<init>", "getCount", "copyFrom"), names(base));

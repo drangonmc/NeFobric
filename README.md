@@ -68,6 +68,17 @@ integration-test/ 端到端测试：真实子进程启动假游戏并加载三�
 
 发布包的安装方法见包内 `README.md`。
 
+Forge 运行时里引用原版类的代码（`compat-forge/src/runtimeMc`）按 Mojang 名编写，编译时要用本机的 1.20.1 游戏文件，打包时再把成员名转成 SRG 名。把这些文件放进 `~/.nefobric/dev/1.20.1`，或用 `-Pnefobric.mcDir=<目录>` 指定：
+
+```
+client.jar                    .minecraft/versions/1.20.1/1.20.1.jar
+client.txt                    Mojang 映射（1.20.1.json 里的 client_mappings）
+mcp_config-1.20.1-*.zip       MCPConfig（SRG 名），也可以放解出来的 joined.tsrg
+libraries/                    .minecraft/libraries，保持原来的目录结构
+```
+
+这些文件不进仓库，也不会被打进发布包。`src/runtimeMc` 里还没有代码时不需要它们。
+
 ## 真机验证与已知风险
 
 2026-11-22 在 Windows 10 x64、OpenJDK 17.0.20.1 上用真实的原版 1.20.1 测过（直接用 `java -cp` 启动客户端，用 `java -jar` 启动专用服务端，带三个测试模组）：

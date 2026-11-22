@@ -10,13 +10,19 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
-/** 重映射整个 jar：类改名、成员改名，资源原样复制；签名文件去掉（改过的类签名对不上）。 */
+/**
+ * 重映射整个 jar：类改名、成员改名，资源原样复制；签名文件去掉（改过的类签名对不上）。目录条目按改名后的路径重建，
+ * 清单放在最前面（{@code JarInputStream} 只在开头找它）。
+ */
 public final class JarRemapper {
     private JarRemapper() {
     }
@@ -42,14 +48,29 @@ public final class JarRemapper {
                 }
             }
         }
+        for (String name : List.copyOf(entries.keySet())) {
+            for (int i = name.indexOf('/'); i >= 0; i = name.indexOf('/', i + 1)) {
+                entries.putIfAbsent(name.substring(0, i + 1), null);
+            }
+        }
+        Set<String> order = new LinkedHashSet<>();
+        for (String first : List.of("META-INF/", "META-INF/MANIFEST.MF")) {
+            if (entries.containsKey(first)) {
+                order.add(first);
+            }
+        }
+        order.addAll(entries.keySet());
         Files.createDirectories(out.toAbsolutePath().getParent());
         Path tmp = Files.createTempFile(out.toAbsolutePath().getParent(), out.getFileName().toString(), ".tmp");
         try (OutputStream os = Files.newOutputStream(tmp); ZipOutputStream zout = new ZipOutputStream(os)) {
-            for (Map.Entry<String, byte[]> e : entries.entrySet()) {
-                ZipEntry ze = new ZipEntry(e.getKey());
+            for (String name : order) {
+                ZipEntry ze = new ZipEntry(name);
                 ze.setTime(0L);
                 zout.putNextEntry(ze);
-                zout.write(e.getValue());
+                byte[] data = entries.get(name);
+                if (data != null) {
+                    zout.write(data);
+                }
                 zout.closeEntry();
             }
         }

@@ -43,6 +43,8 @@ dependencies {
     runtimeCompileOnly project(':loader')
     runtimeCompileOnly sourceSets.main.output
 
+    // 映射文件的解析和核心共用一套
+    devtoolsImplementation project(':loader')
     devtoolsImplementation "org.ow2.asm:asm:${asm_version}"
     devtoolsImplementation "org.ow2.asm:asm-tree:${asm_version}"
     devtoolsImplementation "org.ow2.asm:asm-commons:${asm_version}"
@@ -57,10 +59,105 @@ configurations {
     testImplementation.extendsFrom forgeRuntimeLibs, minecraftProvided
 }
 
-def forgeRuntimeJar = tasks.register('forgeRuntimeJar', Jar) {
-    archiveFileName = 'forge-runtime.jar'
-    destinationDirectory = layout.buildDirectory.dir('forge-runtime')
-    from sourceSets.runtime.output
+// ---- 引用原版的代码：按 Mojang 名写和编译，打包时把成员名转成 SRG 名（类名本来就是 Mojang 名） ----
+// 这部分放在 src/runtimeMc/java，和 runtime 一起编译。编译要用本机的 1.20.1 游戏文件（不进仓库，也不分发）：
+//   <目录>/client.jar（.minecraft/versions/1.20.1/1.20.1.jar）
+//   <目录>/client.txt（Mojang 映射，1.20.1.json 里的 client_mappings）
+//   <目录>/mcp_config-1.20.1-*.zip（或解出来的 joined.tsrg）
+//   <目录>/libraries/（.minecraft/libraries 的目录结构，原版用到的库）
+// 目录依次找：-Pnefobric.mcDir、环境变量 NEFOBRIC_MC_DIR、/mnt/project-files/nefobric/mc、~/.nefobric/dev/1.20.1。
+// src/runtimeMc 里还没有代码时可以没有这些文件。
+def findMinecraft = { ->
+    def dirs = []
+    if (project.hasProperty('nefobric.mcDir')) {
+        dirs << file(project.property('nefobric.mcDir'))
+    }
+    if (System.getenv('NEFOBRIC_MC_DIR')) {
+        dirs << file(System.getenv('NEFOBRIC_MC_DIR'))
+    }
+    dirs << file('/mnt/project-files/nefobric/mc')
+    dirs << file("${System.getProperty('user.home')}/.nefobric/dev/1.20.1")
+    for (File dir : dirs) {
+        if (!dir.isDirectory()) {
+            continue
+        }
+        def first = { List<String> names -> names.collect { new File(dir, it) }.find { it.isFile() } }
+        def client = first(['client.jar', '1.20.1.jar'])
+        def mappings = first(['client.txt', 'client-1.20.1-mappings.txt', 'client_mappings.txt'])
+        def srg = first(['joined.tsrg']) ?: dir.listFiles().findAll { it.name ==~ /mcp_config-1\.20\.1.*\.zip/ }.sort().find()
+        def missing = [client ? null : 'client.jar', mappings ? null : 'client.txt',
+                       srg ? null : 'mcp_config-1.20.1-*.zip'].findAll()
+        if (missing) {
+            logger.warn("Minecraft files in ${dir} are incomplete, missing: ${missing.join(', ')}")
+            continue
+        }
+        return [dir: dir, client: client, mappings: mappings, srg: srg]
+    }
+    return null
+}
+def mc = findMinecraft()
+def mcSources = fileTree('src/runtimeMc/java') { include '**/*.java' }
+sourceSets.runtime.java.srcDir 'src/runtimeMc/java'
+
+def remapTool = 'dev.nefobric.compat.forge.devtools.remap.McRemap'
+def forgeRuntimeFile = layout.buildDirectory.file('forge-runtime/forge-runtime.jar')
+def forgeRuntimeJar
+if (mc == null) {
+    tasks.named('compileRuntimeJava') {
+        def sources = mcSources
+        doFirst {
+            if (!sources.isEmpty()) {
+                throw new GradleException('src/runtimeMc needs the Minecraft 1.20.1 files (client.jar, client.txt, '
+                        + 'mcp_config zip, libraries/). Put them in ~/.nefobric/dev/1.20.1 or pass -Pnefobric.mcDir=<dir>.')
+            }
+        }
+    }
+    forgeRuntimeJar = tasks.register('forgeRuntimeJar', Jar) {
+        archiveFileName = 'forge-runtime.jar'
+        destinationDirectory = layout.buildDirectory.dir('forge-runtime')
+        from sourceSets.runtime.output
+    }
+} else {
+    logger.info("Minecraft files for the Forge runtime: ${mc.dir}")
+    def mcLibs = fileTree(new File(mc.dir, 'libraries')) {
+        include '**/*.jar'
+        exclude '**/*-natives-*.jar'
+    }
+    def namedMcFile = layout.buildDirectory.file('minecraft/client-1.20.1-named.jar')
+    def namedMinecraftJar = tasks.register('namedMinecraftJar', JavaExec) {
+        description = 'Remaps the obfuscated Minecraft client jar to Mojang names, for compiling the runtime (not shipped).'
+        classpath = sourceSets.devtools.runtimeClasspath
+        mainClass = remapTool
+        inputs.files(mc.client, mc.mappings)
+        outputs.file(namedMcFile)
+        args 'named', mc.client.absolutePath, mc.mappings.absolutePath, namedMcFile.get().asFile.absolutePath
+    }
+    dependencies {
+        runtimeCompileOnly files(namedMinecraftJar)
+        runtimeCompileOnly mcLibs
+        testImplementation files(namedMinecraftJar)
+        testImplementation mcLibs
+    }
+    def forgeRuntimeNamedJar = tasks.register('forgeRuntimeNamedJar', Jar) {
+        archiveFileName = 'forge-runtime-named.jar'
+        destinationDirectory = layout.buildDirectory.dir('forge-runtime-named')
+        from sourceSets.runtime.output
+    }
+    // Mojang 成员名 → SRG 成员名，和核心重映射后的游戏对得上
+    forgeRuntimeJar = tasks.register('forgeRuntimeJar', JavaExec) {
+        description = 'Remaps the runtime from Mojang member names to SRG member names.'
+        classpath = sourceSets.devtools.runtimeClasspath
+        mainClass = remapTool
+        def named = forgeRuntimeNamedJar.flatMap { it.archiveFile }
+        def libs = files(mcLibs, configurations.forgeRuntimeLibs, configurations.minecraftProvided)
+        inputs.files(named, namedMinecraftJar, mc.mappings, mc.srg, libs)
+        outputs.file(forgeRuntimeFile)
+        argumentProviders.add({
+            ['reobf', named.get().asFile.absolutePath, forgeRuntimeFile.get().asFile.absolutePath,
+             mc.mappings.absolutePath, mc.srg.absolutePath, namedMcFile.get().asFile.absolutePath] +
+                    libs.files.collect { it.absolutePath }
+        } as CommandLineArgumentProvider)
+    }
 }
 
 jar {
@@ -101,7 +198,9 @@ configurations {
     }
 }
 artifacts {
-    forgeApiElements(forgeRuntimeJar)
+    forgeApiElements(forgeRuntimeFile) {
+        builtBy forgeRuntimeJar
+    }
 }
 
 tasks.named('compileRuntimeJava', JavaCompile) {
