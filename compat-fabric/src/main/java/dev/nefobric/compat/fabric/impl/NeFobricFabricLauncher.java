@@ -60,10 +60,9 @@ public final class NeFobricFabricLauncher extends FabricLauncherBase {
         return NeFobricLoader.get().env() == Env.CLIENT ? EnvType.CLIENT : EnvType.SERVER;
     }
 
-    /** 核心还没有提供“是否已加载”的查询，暂时总是返回 false（Fabric 也只把它当作提示）。 */
     @Override
     public boolean isClassLoaded(String name) {
-        return false;
+        return NeFobricLoader.isInitialized() && loader().isClassLoaded(name);
     }
 
     @Override
@@ -81,12 +80,13 @@ public final class NeFobricFabricLauncher extends FabricLauncherBase {
         return NeFobricLoader.isInitialized() ? loader() : Thread.currentThread().getContextClassLoader();
     }
 
-    /** 返回类文件的原始字节（核心还没有提供变换后的字节，runTransformers 暂时不起作用）。 */
+    /**
+     * 与 Knot 相同：{@code runTransformers} 时返回 Mixin 之前各阶段（入口钩子、@Environment 剥离、AW）处理过的字节，
+     * 否则返回类文件原样的字节。找不到时返回 {@code null}。
+     */
     @Override
     public byte[] getClassByteArray(String name, boolean runTransformers) throws IOException {
-        try (InputStream in = loader().getResourceAsStream(name.replace('.', '/') + ".class")) {
-            return in == null ? null : in.readAllBytes();
-        }
+        return runTransformers ? loader().getPreMixinClassBytes(name) : loader().getRawClassBytes(name);
     }
 
     @Override

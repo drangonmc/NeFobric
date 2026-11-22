@@ -20,6 +20,7 @@
     ]
   },
   "mixins": ["fabric_hello.mixins.json"],
+  "accessWidener": "fabric_hello.accesswidener",
   "custom": {
     "fabric_hello:probe": {"answer": 42, "list": ["a"]}
   },
