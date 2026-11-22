@@ -5,4 +5,34 @@ plugins {
 dependencies {
     implementation project(':loader')
     implementation "com.google.code.gson:gson:${gson_version}"
+    // Fabric 的 Mixin 分支（Fabric Loader 0.16.10 自带的版本）：只在编译时需要，运行时由核心打包同一版本
+    compileOnly "net.fabricmc:sponge-mixin:0.15.4+mixin.0.8.7"
+    testImplementation "net.fabricmc:sponge-mixin:0.15.4+mixin.0.8.7"
+}
+
+// API 覆盖检查工具（不进发布包）：
+//   ./gradlew :compat-fabric:fabricApiCheck -Pref=fabric-loader-0.16.10.jar   与真实 Fabric Loader 逐项比对
+//   ./gradlew :compat-fabric:fabricApiCheck -Pmods=<目录或 jar>                 扫描模组实际用到而我们缺的类和成员
+sourceSets {
+    apicheck {
+        java.srcDir 'src/apicheck/java'
+    }
+}
+
+dependencies {
+    apicheckImplementation "org.ow2.asm:asm-tree:${asm_version}"
+}
+
+tasks.register('fabricApiCheck', JavaExec) {
+    group = 'verification'
+    description = 'Checks the Fabric Loader API surface against a reference jar or real mods'
+    dependsOn classes
+    classpath = sourceSets.apicheck.runtimeClasspath
+    mainClass = 'dev.nefobric.compat.fabric.apicheck.ApiSurfaceCheck'
+    ignoreExitValue = true
+    doFirst {
+        def target = project.findProperty('ref') ? ['--reference', project.property('ref')]
+                : ['--mods'] + (project.findProperty('mods') ?: '').toString().split(File.pathSeparator).toList()
+        args = [sourceSets.main.output.classesDirs.singleFile.absolutePath] + target
+    }
 }

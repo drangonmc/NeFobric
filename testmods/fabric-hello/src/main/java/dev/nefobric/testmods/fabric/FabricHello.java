@@ -28,6 +28,7 @@ public class FabricHello implements PreLaunchEntrypoint, ModInitializer, ClientM
                 + ", neoforge_hello=" + loader.isModLoaded("neoforge_hello")
                 + ", minecraft=" + loader.isModLoaded("minecraft")
                 + ", gameLoader=" + gameClassLoader(loader.getEnvironmentType()));
+        log("api: " + ApiProbe.runAll());
     }
 
     @Override

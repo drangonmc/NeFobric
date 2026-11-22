@@ -5,33 +5,56 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import dev.nefobric.compat.fabric.metadata.ContactInformationImpl;
+import dev.nefobric.compat.fabric.metadata.CustomValueImpl;
+import dev.nefobric.compat.fabric.metadata.FabricModMetadata;
+import dev.nefobric.compat.fabric.metadata.FabricModMetadata.EntrypointMetadata;
+import dev.nefobric.compat.fabric.metadata.FabricModMetadata.MixinEntry;
+import dev.nefobric.compat.fabric.metadata.ModDependencyImpl;
+import dev.nefobric.compat.fabric.metadata.PersonImpl;
+import dev.nefobric.compat.fabric.version.FabricPredicateAdapter;
+import dev.nefobric.compat.fabric.version.VersionParser;
+import dev.nefobric.loader.mapping.Mappings;
 import dev.nefobric.loader.metadata.Dependency;
 import dev.nefobric.loader.metadata.Ecosystem;
 import dev.nefobric.loader.metadata.ModCandidate;
 import dev.nefobric.loader.metadata.ModMetadataException;
 import dev.nefobric.loader.metadata.SideRestriction;
 import dev.nefobric.loader.util.Messages;
-import dev.nefobric.loader.version.FabricVersionPredicate;
-import dev.nefobric.loader.version.VersionPredicate;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.loader.api.Version;
+import net.fabricmc.loader.api.VersionParsingException;
+import net.fabricmc.loader.api.metadata.ContactInformation;
+import net.fabricmc.loader.api.metadata.ModDependency;
+import net.fabricmc.loader.api.metadata.ModEnvironment;
+import net.fabricmc.loader.api.metadata.Person;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** 解析 {@code fabric.mod.json}（schemaVersion 1）。 */
+/**
+ * 解析 {@code fabric.mod.json}（schemaVersion 1）的全部字段，规则对齐 Fabric Loader 0.16：
+ * id、version、environment、entrypoints（含 adapter）、jars、languageAdapters、mixins（含 environment）、accessWidener、
+ * depends / recommends / suggests / conflicts / breaks、provides、name、description、authors、contributors、contact、
+ * license、icon、custom。结果同时给出核心用的 {@link ModCandidate} 和 Fabric API 用的 {@link FabricModMetadata}。
+ */
 public final class FabricMetadataParser {
+    /** {@link ModCandidate#extra} 里存放 {@link FabricModMetadata} 的键。 */
+    public static final String EXTRA_METADATA = "fabric.metadata";
+
     private static final Pattern MOD_ID = Pattern.compile("[a-z][a-z0-9-_]{1,63}");
-    private static final Map<String, Dependency.Kind> DEPENDENCY_FIELDS = Map.of(
-            "depends", Dependency.Kind.REQUIRED,
-            "recommends", Dependency.Kind.RECOMMENDED,
-            "suggests", Dependency.Kind.SUGGESTED,
-            "breaks", Dependency.Kind.INCOMPATIBLE,
-            "conflicts", Dependency.Kind.DISCOURAGED);
-    private static final List<String> DEPENDENCY_ORDER = List.of("depends", "recommends", "suggests", "breaks", "conflicts");
+    private static final List<String> DEPENDENCY_FIELDS = List.of("depends", "recommends", "suggests", "conflicts", "breaks");
 
     private FabricMetadataParser() {
+    }
+
+    public static FabricModMetadata metadata(ModCandidate mod) {
+        return mod.extra(EXTRA_METADATA, FabricModMetadata.class);
     }
 
     public static ModCandidate parse(String json, Path origin) throws ModMetadataException {
@@ -62,90 +85,225 @@ public final class FabricMetadataParser {
         if (!MOD_ID.matcher(id).matches()) {
             throw new ModMetadataException(Messages.tr("fabric.badId", id));
         }
-        String version = requireString(o, "version");
-        ModCandidate.Builder b = ModCandidate.builder(id, version, Ecosystem.FABRIC)
+        String versionString = requireString(o, "version");
+        Version version;
+        try {
+            version = VersionParser.parse(versionString, false);
+        } catch (VersionParsingException e) {
+            throw new ModMetadataException(Messages.tr("fabric.missingField", "version"), e);
+        }
+
+        FabricModMetadata.Builder meta = FabricModMetadata.builder("fabric", id, version);
+        ModEnvironment environment = parseEnvironment(o.get("environment"));
+        meta.environment(environment);
+        ModCandidate.Builder b = ModCandidate.builder(id, versionString, Ecosystem.FABRIC)
                 .origin(origin)
-                .name(optString(o, "name"))
-                .environment(parseEnvironment(o.get("environment")));
+                .environment(toSide(environment))
+                // Fabric 模组按 intermediary 编译，核心据此把整个 jar（含 refmap）重映射到运行时命名空间
+                .sourceNamespace(Mappings.INTERMEDIARY);
 
         if (o.has("entrypoints")) {
             for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("entrypoints").entrySet()) {
                 for (JsonElement entry : asArray(e.getValue())) {
-                    b.entrypoint(e.getKey(), parseEntrypoint(e.getKey(), entry));
+                    EntrypointMetadata ep = parseEntrypoint(entry);
+                    meta.entrypoint(e.getKey(), ep);
+                    b.entrypoint(e.getKey(), ep.value());
                 }
             }
         }
+        if (o.has("jars")) {
+            for (JsonElement j : o.getAsJsonArray("jars")) {
+                String file = j.getAsJsonObject().get("file").getAsString();
+                meta.jar(file);
+                b.nestedJar(file);
+            }
+        }
+        if (o.has("languageAdapters")) {
+            for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("languageAdapters").entrySet()) {
+                meta.languageAdapter(e.getKey(), e.getValue().getAsString());
+            }
+        }
+        if (o.has("mixins")) {
+            for (JsonElement m : o.getAsJsonArray("mixins")) {
+                MixinEntry entry;
+                if (m.isJsonObject()) {
+                    JsonObject mo = m.getAsJsonObject();
+                    ModEnvironment env = parseEnvironment(mo.get("environment"));
+                    entry = new MixinEntry(mo.get("config").getAsString(), toEnvType(env));
+                } else {
+                    entry = new MixinEntry(m.getAsString(), null);
+                }
+                meta.mixin(entry);
+                b.mixinConfig(entry.config());
+            }
+        }
+        if (o.has("accessWidener") && !o.get("accessWidener").isJsonNull()) {
+            String aw = o.get("accessWidener").getAsString();
+            meta.accessWidener(aw);
+            b.accessTransformer(aw);
+        }
 
-        for (String field : DEPENDENCY_ORDER) {
+        for (String field : DEPENDENCY_FIELDS) {
             if (!o.has(field)) {
                 continue;
             }
-            Dependency.Kind kind = DEPENDENCY_FIELDS.get(field);
+            ModDependency.Kind kind = ModDependency.Kind.parse(field);
             for (Map.Entry<String, JsonElement> e : o.getAsJsonObject(field).entrySet()) {
-                b.dependency(Dependency.of(e.getKey(), kind, parsePredicate(id, e.getKey(), e.getValue())));
+                List<String> matchers = new ArrayList<>();
+                for (JsonElement v : asArray(e.getValue())) {
+                    matchers.add(v.getAsString());
+                }
+                ModDependencyImpl dep;
+                try {
+                    dep = new ModDependencyImpl(kind, e.getKey(), matchers);
+                } catch (VersionParsingException ex) {
+                    throw new ModMetadataException(Messages.tr("fabric.badPredicate", e.getKey(), String.join(" || ", matchers)), ex);
+                }
+                meta.dependency(dep);
+                b.dependency(Dependency.of(e.getKey(), toCoreKind(kind),
+                        new FabricPredicateAdapter(dep, matchers.isEmpty() ? "[]" : String.join(" || ", matchers))));
             }
         }
 
         if (o.has("provides")) {
             for (JsonElement p : o.getAsJsonArray("provides")) {
+                meta.provides(p.getAsString());
                 b.provides(p.getAsString());
             }
         }
-        if (o.has("jars")) {
-            for (JsonElement j : o.getAsJsonArray("jars")) {
-                b.nestedJar(j.getAsJsonObject().get("file").getAsString());
+        String name = optString(o, "name");
+        meta.name(name);
+        b.name(name);
+        meta.description(optString(o, "description"));
+        for (Person p : parsePeople(o.get("authors"))) {
+            meta.author(p);
+        }
+        for (Person p : parsePeople(o.get("contributors"))) {
+            meta.contributor(p);
+        }
+        if (o.has("contact") && o.get("contact").isJsonObject()) {
+            meta.contact(parseContact(o.getAsJsonObject("contact")));
+        }
+        if (o.has("license")) {
+            for (JsonElement l : asArray(o.get("license"))) {
+                meta.license(l.getAsString());
             }
         }
-        if (o.has("mixins")) {
-            for (JsonElement m : o.getAsJsonArray("mixins")) {
-                b.mixinConfig(m.isJsonObject() ? m.getAsJsonObject().get("config").getAsString() : m.getAsString());
+        if (o.has("icon")) {
+            JsonElement icon = o.get("icon");
+            if (icon.isJsonObject()) {
+                for (Map.Entry<String, JsonElement> e : icon.getAsJsonObject().entrySet()) {
+                    int size = Integer.parseInt(e.getKey());
+                    if (size < 1) {
+                        throw new ModMetadataException(Messages.tr("fabric.badJson", "icon size must be positive: " + size));
+                    }
+                    meta.icon(size, e.getValue().getAsString());
+                }
+            } else if (!icon.isJsonNull()) {
+                meta.icon(icon.getAsString());
             }
         }
-        if (o.has("accessWidener")) {
-            b.accessTransformer(o.get("accessWidener").getAsString());
+        if (o.has("custom") && o.get("custom").isJsonObject()) {
+            for (Map.Entry<String, JsonElement> e : o.getAsJsonObject("custom").entrySet()) {
+                meta.custom(e.getKey(), CustomValueImpl.fromJson(e.getValue()));
+            }
         }
+
+        b.extra(EXTRA_METADATA, meta.build());
         return b.build();
     }
 
-    private static String parseEntrypoint(String key, JsonElement entry) throws ModMetadataException {
+    private static EntrypointMetadata parseEntrypoint(JsonElement entry) {
         if (entry.isJsonPrimitive()) {
-            return entry.getAsString();
+            return new EntrypointMetadata("default", entry.getAsString());
         }
         JsonObject obj = entry.getAsJsonObject();
         String adapter = obj.has("adapter") ? obj.get("adapter").getAsString() : "default";
-        if (!"default".equals(adapter)) {
-            throw new ModMetadataException(Messages.tr("fabric.unsupportedAdapter", key, adapter));
-        }
-        return obj.get("value").getAsString();
+        return new EntrypointMetadata(adapter, obj.get("value").getAsString());
     }
 
-    private static VersionPredicate parsePredicate(String modId, String depId, JsonElement value)
-            throws ModMetadataException {
-        List<VersionPredicate> alternatives = new ArrayList<>();
-        for (JsonElement v : asArray(value)) {
-            try {
-                alternatives.add(FabricVersionPredicate.parse(v.getAsString()));
-            } catch (IllegalArgumentException e) {
-                throw new ModMetadataException(Messages.tr("fabric.badPredicate", depId, v.getAsString()), e);
+    private static List<Person> parsePeople(JsonElement e) {
+        List<Person> out = new ArrayList<>();
+        if (e == null || e.isJsonNull()) {
+            return out;
+        }
+        for (JsonElement p : asArray(e)) {
+            if (p.isJsonPrimitive()) {
+                out.add(new PersonImpl(p.getAsString(), ContactInformation.EMPTY));
+            } else if (p.isJsonObject()) {
+                JsonObject po = p.getAsJsonObject();
+                ContactInformation contact = po.has("contact") && po.get("contact").isJsonObject()
+                        ? parseContact(po.getAsJsonObject("contact")) : ContactInformation.EMPTY;
+                out.add(new PersonImpl(po.get("name").getAsString(), contact));
             }
         }
-        return VersionPredicate.anyOf(alternatives);
+        return out;
     }
 
-    private static SideRestriction parseEnvironment(JsonElement e) throws ModMetadataException {
-        if (e == null || e.isJsonNull()) {
-            return SideRestriction.ANY;
+    private static ContactInformation parseContact(JsonObject o) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> e : o.entrySet()) {
+            if (e.getValue().isJsonPrimitive()) {
+                map.put(e.getKey(), e.getValue().getAsString());
+            }
         }
-        String s = e.getAsString();
+        return new ContactInformationImpl(map);
+    }
+
+    private static Dependency.Kind toCoreKind(ModDependency.Kind kind) {
+        switch (kind) {
+            case DEPENDS:
+                return Dependency.Kind.REQUIRED;
+            case RECOMMENDS:
+                return Dependency.Kind.RECOMMENDED;
+            case SUGGESTS:
+                return Dependency.Kind.SUGGESTED;
+            case CONFLICTS:
+                return Dependency.Kind.DISCOURAGED;
+            case BREAKS:
+            default:
+                return Dependency.Kind.INCOMPATIBLE;
+        }
+    }
+
+    /** 与 Fabric Loader 相同：不区分大小写，空字符串和 “*” 都表示两端。 */
+    private static ModEnvironment parseEnvironment(JsonElement e) throws ModMetadataException {
+        if (e == null || e.isJsonNull()) {
+            return ModEnvironment.UNIVERSAL;
+        }
+        String s = e.getAsString().toLowerCase(Locale.ROOT);
         switch (s) {
+            case "":
             case "*":
-                return SideRestriction.ANY;
+                return ModEnvironment.UNIVERSAL;
             case "client":
-                return SideRestriction.CLIENT;
+                return ModEnvironment.CLIENT;
             case "server":
+                return ModEnvironment.SERVER;
+            default:
+                throw new ModMetadataException(Messages.tr("fabric.badEnvironment", e.getAsString()));
+        }
+    }
+
+    static SideRestriction toSide(ModEnvironment env) {
+        switch (env) {
+            case CLIENT:
+                return SideRestriction.CLIENT;
+            case SERVER:
                 return SideRestriction.SERVER;
             default:
-                throw new ModMetadataException(Messages.tr("fabric.badEnvironment", s));
+                return SideRestriction.ANY;
+        }
+    }
+
+    private static EnvType toEnvType(ModEnvironment env) {
+        switch (env) {
+            case CLIENT:
+                return EnvType.CLIENT;
+            case SERVER:
+                return EnvType.SERVER;
+            default:
+                return null;
         }
     }
 

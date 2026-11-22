@@ -68,11 +68,7 @@ class FabricMetadataParserTest {
         assertThrows(ModMetadataException.class,
                 () -> FabricMetadataParser.parse("{\"schemaVersion\":1,\"id\":\"ok\"}", Paths.get("x.jar")));
         assertThrows(ModMetadataException.class, () -> FabricMetadataParser.parse("""
-                {"schemaVersion":1,"id":"kt","version":"1",
-                 "entrypoints":{"main":[{"adapter":"kotlin","value":"com.example.Main"}]}}
-                """, Paths.get("x.jar")));
-        assertThrows(ModMetadataException.class, () -> FabricMetadataParser.parse("""
-                {"schemaVersion":1,"id":"ok","version":"1","depends":{"minecraft":">=???"}}
+                {"schemaVersion":1,"id":"ok","version":"1","depends":{"minecraft":">v1"}}
                 """, Paths.get("x.jar")));
     }
 }

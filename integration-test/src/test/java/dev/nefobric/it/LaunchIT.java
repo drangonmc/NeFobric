@@ -120,6 +120,8 @@ class LaunchIT {
         assertTrue(r.output().contains("[forge_hello] constructed: Hello from Forge! / 你好，Forge！ thread=Render thread,"
                 + " loader=NeFobric"), r.output());
         assertFalse(r.output().contains("server entrypoint ran"), r.output());
+        // Fabric Loader 公开 API 的运行时检查（见 fabric-hello 的 ApiProbe）
+        assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(r.output().contains("Skipped quilt-thing.jar: Quilt mods are not supported yet."), r.output());
         assertTrue(r.output().contains("Skipped some-library.jar: not a Fabric, Forge or NeoForge mod."), r.output());
         assertTrue(Files.isRegularFile(gameDir.resolve("logs/nefobric-latest.log")));
@@ -146,6 +148,7 @@ class LaunchIT {
                 "[FakeGame] server running, properties=server.properties, library=fake-library-1.0, loader=NeFobric");
         assertTrue(r.output().contains("env=SERVER"), r.output());
         assertFalse(r.output().contains("client entrypoint ran"), r.output());
+        assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(Files.isRegularFile(serverDir.resolve("versions/1.20.1/server-1.20.1.jar")));
         assertTrue(Files.isRegularFile(serverDir.resolve("libraries/org/example/fake-library/1.0/fake-library-1.0.jar")));
 
