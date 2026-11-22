@@ -1,70 +1,43 @@
 package dev.nefobric.compat.forge.devtools.remap;
 
+import dev.nefobric.loader.mapping.MappingData;
+import dev.nefobric.loader.mapping.MappingReaders;
+import dev.nefobric.loader.mapping.Mappings;
 import org.objectweb.asm.commons.SimpleRemapper;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * MCPConfig 的 {@code joined.tsrg}（TSRG2，首行 {@code tsrg2 obf srg id}）：混淆名 → SRG 成员名。
- * 类名一列不用（运行时的类名是 Mojang 名）。
+ * MCPConfig 的 {@code joined.tsrg}：混淆名 → SRG 成员名。解析用核心的 {@link MappingReaders#readTsrg}，和加载器
+ * 重映射游戏时读的是同一份逻辑；类名一列不用（运行时的类名是 Mojang 名）。
  */
 public final class TsrgMappings {
-    final Map<String, Map<String, String>> fields = new HashMap<>();
-    final Map<String, Map<String, String>> methods = new HashMap<>();
+    private final MappingData data;
 
-    private TsrgMappings() {
+    private TsrgMappings(MappingData data) {
+        this.data = data;
     }
 
     public static TsrgMappings read(BufferedReader in) throws IOException {
-        TsrgMappings m = new TsrgMappings();
-        String owner = null;
-        String first = in.readLine();
-        if (first != null && !first.startsWith("tsrg2")) {
-            owner = classLine(first);
-        }
-        for (String line; (line = in.readLine()) != null; ) {
-            if (line.isBlank() || line.startsWith("#")) {
-                continue;
-            }
-            if (line.startsWith("\t\t")) {
-                continue;
-            }
-            if (!line.startsWith("\t")) {
-                owner = classLine(line);
-                continue;
-            }
-            String[] p = line.substring(1).split(" ");
-            if (p.length >= 3 && p[1].startsWith("(")) {
-                m.methods.computeIfAbsent(owner, k -> new HashMap<>()).put(p[0] + p[1], p[2]);
-            } else if (p.length >= 3 && !p[1].startsWith("(") && !isNumber(p[2])) {
-                // 带描述符的字段：obf desc srg [id]
-                m.fields.computeIfAbsent(owner, k -> new HashMap<>()).put(p[0], p[2]);
-            } else if (p.length >= 2) {
-                m.fields.computeIfAbsent(owner, k -> new HashMap<>()).put(p[0], p[1]);
-            }
-        }
-        return m;
+        MappingData.Builder b = MappingData.builder(List.of(Mappings.OFFICIAL, Mappings.SRG));
+        MappingReaders.readTsrg(in, b, null, Mappings.SRG);
+        return new TsrgMappings(b.build(Mappings.SRG));
     }
 
-    private static String classLine(String line) {
-        return line.split(" ")[0];
-    }
-
-    private static boolean isNumber(String s) {
-        return !s.isEmpty() && s.chars().allMatch(Character::isDigit);
-    }
-
+    /** @return SRG 名；表里没有（或 SRG 名和混淆名相同）时返回 {@code null} */
     public String field(String obfOwner, String obfName) {
-        Map<String, String> f = fields.get(obfOwner);
-        return f == null ? null : f.get(obfName);
+        String srg = data.mapFieldInternal(Mappings.OFFICIAL, Mappings.SRG, obfOwner, obfName, null);
+        return srg.equals(obfName) ? null : srg;
     }
 
+    /** @return SRG 名；表里没有（或 SRG 名和混淆名相同）时返回 {@code null} */
     public String method(String obfOwner, String obfName, String obfDesc) {
-        Map<String, String> ms = methods.get(obfOwner);
-        return ms == null ? null : ms.get(obfName + obfDesc);
+        String srg = data.mapMethodInternal(Mappings.OFFICIAL, Mappings.SRG, obfOwner, obfName, obfDesc);
+        return srg.equals(obfName) ? null : srg;
     }
 
     /**
