@@ -106,8 +106,9 @@ class LaunchIT {
                 "Loading 3 mod(s) (Fabric 1, Forge 1, NeoForge 1)",
                 "Mixin 0.8.7 ready: 2 configs from 2 mods",
                 "[fabric_hello] preLaunch",
-                "Installed the game hook in net.minecraft.client.main.Main",
                 "[FakeGame] client bootstrap",
+                // 和 Fabric Loader 一样插在游戏对象的构造函数里、游戏目录赋值之后
+                "Installed the game hook in net.minecraft.client.FakeMinecraft",
                 "[forge_hello] constructed: Hello from Forge!",
                 "[neoforge_hello] constructed: Hello from NeoForge!",
                 "[fabric_hello] main: Hello from Fabric!",
@@ -123,6 +124,8 @@ class LaunchIT {
         assertTrue(r.output().contains("[forge_hello] constructed: Hello from Forge! / 你好，Forge！ thread=Render thread,"
                 + " loader=NeFobric"), r.output());
         assertFalse(r.output().contains("server entrypoint ran"), r.output());
+        // 游戏对象在客户端入口运行之前就交给了 FabricLoader.getGameInstance()
+        assertTrue(r.output().contains("client entrypoint ran, game=net.minecraft.client.FakeMinecraft"), r.output());
         // Fabric Loader 公开 API 的运行时检查（见 fabric-hello 的 ApiProbe）
         assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(r.output().contains("Skipped quilt-thing.jar: Quilt mods are not supported yet."), r.output());
@@ -217,5 +220,24 @@ class LaunchIT {
         assertTrue(r.output().contains("broken_mod 0.1.0 (Fabric, broken.jar) failed in main (com.example.DoesNotExist)"),
                 r.output());
         assertFalse(r.output().contains("[FakeGame] client running"), r.output());
+        // 原版的崩溃处理能拿到游戏目录，写出自己的 “Initializing game” 报告，而不是连锁报 NPE
+        assertTrue(r.output().contains("[FakeGame] crash report: Initializing game: "
+                + "dev.nefobric.loader.impl.ModInitializationError"), r.output());
+        assertFalse(r.output().contains("NullPointerException"), r.output());
+    }
+
+    @Test
+    void crashingModStopsTheServerWithExitCode1(@TempDir Path serverDir) throws Exception {
+        Path mods = Files.createDirectories(serverDir.resolve("mods"));
+        writeJar(mods.resolve("broken.jar"), "fabric.mod.json", """
+                {"schemaVersion": 1, "id": "broken_mod", "version": "0.1.0",
+                 "entrypoints": {"main": ["com.example.DoesNotExist"]}}
+                """);
+        Files.copy(FAKE_SERVER, serverDir.resolve("server.jar"));
+        Run r = run(serverDir, java("-jar", LOADER.toString(), "nogui"));
+
+        assertEquals(1, r.exitCode(), r.output());
+        r.assertInOrder("A mod failed to initialize", "Stopping the server because a mod failed to initialize");
+        assertFalse(r.output().contains("[FakeGame] server running"), r.output());
     }
 }

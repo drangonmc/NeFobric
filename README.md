@@ -38,8 +38,8 @@ NeFobric 是一个从零自研的 Minecraft 模组加载器，目标是让 Fabri
 5. **Mixin**：注册各模组的 Mixin 配置，进入 DEFAULT 阶段，先触发一次配置选择（Mixin 插件的 `onLoad` 在这里运行），然后把 Mixin 挂到流水线最后。配置有错时在移交游戏之前报出来。
 6. **preLaunch**：Fabric `preLaunch` 入口。
 7. **移交原版主类**。原版运行到钩子位置时：
-   - 客户端：`Thread.currentThread().setName("Render thread")` 之后、构造游戏对象之前（Bootstrap 已完成，运行在渲染线程上）；
-   - 服务端：读取 `server.properties` 之前（Bootstrap 之后，与 Fabric Loader 的位置相同）。
+   - 客户端：和 Fabric Loader 相同，在游戏对象 `Minecraft` 的构造函数里、游戏目录赋值之后（渲染线程已初始化，`Minecraft.getInstance()` 可用；游戏对象同时交给 `NeFobricLoader.gameInstance()`）。模组初始化失败时原版能照常写出 “Initializing game” 崩溃报告。找不到插入点时退回到主类 `setName("Render thread")` 之后；
+   - 服务端：读取 `server.properties` 之前（Bootstrap 之后，与 Fabric Loader 的位置相同）。模组初始化失败时以退出码 1 结束（原版这里会以 0 退出）。
 8. **钩子触发**：构造 Forge 系 `@Mod` 主类 → Fabric `main` → 按端运行 Fabric `client` 或 `server`。这与架构文档“生命周期对齐”一节的顺序一致。
 
 内置虚拟模组的版本号（`fabricloader` 0.16.10、`forge` 47.4.0、`neoforge` 47.1.106）只用于通过模组的依赖检查，并不代表已经实现了对应版本的 API。依赖 `fabric-api` 的模组会因为“未安装 fabric-api”而停下，这是有意的：Alpha 还不提供 Fabric API。
