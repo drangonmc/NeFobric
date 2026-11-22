@@ -2,10 +2,13 @@ package dev.nefobric.compat.forge.transform;
 
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InnerClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 import java.io.IOException;
@@ -76,6 +79,39 @@ class AccessTransformerTest {
         // 只放宽，不收紧
         assertEquals(Opcodes.ACC_PUBLIC, method(out, "open").access);
         assertEquals(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC, method(out, "helper").access);
+    }
+
+    @Test
+    void callsToWidenedPrivateMethodsBecomeVirtual() throws IOException {
+        // javac 11 以后同类里调用私有方法多半已经是 INVOKEVIRTUAL；老编译器和混淆器产出的是 INVOKESPECIAL
+        byte[] special = withSpecialCall(bytes(FIXTURE));
+        assertEquals(Opcodes.INVOKESPECIAL, calls(method(read(special), "callsSecret"), "secret").getOpcode());
+        AccessTransformers at = AccessTransformers.builder()
+                .parse("protected dev.nefobric.compat.forge.transform.AtFixture secret(I)I\n", "test").build();
+        ClassNode out = read(new AccessTransformerApplier(at).transform(FIXTURE, special));
+        assertEquals(Opcodes.INVOKEVIRTUAL, calls(method(out, "callsSecret"), "secret").getOpcode());
+        // 没被放开的私有方法照旧
+        ClassNode untouched = read(new AccessTransformerApplier(AccessTransformers.builder()
+                .parse("public dev.nefobric.compat.forge.transform.AtFixture counter\n", "test").build())
+                .transform(FIXTURE, special));
+        assertEquals(Opcodes.INVOKESPECIAL, calls(method(untouched, "callsSecret"), "secret").getOpcode());
+    }
+
+    private static byte[] withSpecialCall(byte[] bytes) {
+        ClassNode n = read(bytes);
+        calls(method(n, "callsSecret"), "secret").setOpcode(Opcodes.INVOKESPECIAL);
+        ClassWriter w = new ClassWriter(0);
+        n.accept(w);
+        return w.toByteArray();
+    }
+
+    private static MethodInsnNode calls(MethodNode m, String name) {
+        for (AbstractInsnNode insn : m.instructions) {
+            if (insn instanceof MethodInsnNode mi && mi.name.equals(name)) {
+                return mi;
+            }
+        }
+        throw new AssertionError("no call to " + name);
     }
 
     @Test
