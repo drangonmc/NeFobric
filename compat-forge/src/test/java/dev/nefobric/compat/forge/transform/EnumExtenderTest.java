@@ -29,6 +29,7 @@ class EnumExtenderTest {
     private static final String VANILLA_LIKE = "dev.nefobric.compat.forge.transform.EnumFixtures$VanillaLike";
     private static final String NO_CTOR = "dev.nefobric.compat.forge.transform.EnumFixtures$NoMatchingConstructor";
     private static final String WITH_BODIES = "dev.nefobric.compat.forge.transform.EnumFixtures$WithBodies";
+    private static final String ABSTRACT = "dev.nefobric.compat.forge.transform.AbstractExtensibleFixture";
 
     @Test
     void createAppendsConstantsVisibleToValuesValueOfAndEnumSet() throws Exception {
@@ -112,6 +113,17 @@ class EnumExtenderTest {
     }
 
     @Test
+    void abstractExtensibleEnumStillLoadsButIsNotRewritten() throws Exception {
+        byte[] in = bytes(ABSTRACT);
+        assertSame(in, new EnumExtender().transform(ABSTRACT, in));
+        // 常量 A 的类体是子类 AbstractExtensibleFixture$1，也要由同一个类加载器加载
+        Class<?> e = load(ABSTRACT, Map.of(ABSTRACT, in, ABSTRACT + "$1", bytes(ABSTRACT + "$1")));
+        InvocationTargetException thrown = assertThrows(InvocationTargetException.class,
+                () -> e.getMethod("create", String.class).invoke(null, "B"));
+        assertTrue(thrown.getCause() instanceof IllegalStateException, thrown.getCause().toString());
+    }
+
+    @Test
     void createWithoutMatchingConstructorIsRejected() throws IOException {
         byte[] in = bytes(NO_CTOR);
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> new EnumExtender().transform(NO_CTOR, in));
@@ -130,9 +142,13 @@ class EnumExtenderTest {
 
     /** 用单独的类加载器加载变换后的类，别的类（IExtensibleEnum、ExtensibleEnums）交给测试的类加载器。 */
     private static Class<?> load(String name, byte[] bytes) throws ClassNotFoundException {
+        return load(name, Map.of(name, bytes));
+    }
+
+    /** 同上，{@code classes} 里还可以放常量体生成的子类（Name$1）这些要一起换掉的类。 */
+    private static Class<?> load(String name, Map<String, byte[]> classes) throws ClassNotFoundException {
         ClassLoader parent = EnumExtenderTest.class.getClassLoader();
         ClassLoader loader = new ClassLoader("enum-test", parent) {
-            private final Map<String, byte[]> classes = Map.of(name, bytes);
 
             @Override
             protected Class<?> loadClass(String n, boolean resolve) throws ClassNotFoundException {
