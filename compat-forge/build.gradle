@@ -2,7 +2,106 @@ plugins {
     id 'java-library'
 }
 
+// compat-forge 分两部分：
+//  - main：兼容层本身（读 mods.toml、扫描 @Mod），由加载器（父类加载器）加载；
+//  - runtime：自己重写的 Forge API（net.minecraftforge.*）和实现（dev.nefobric.forge.*）。它们引用原版类，
+//    必须和游戏、模组一起由游戏类加载器加载，所以打成 forge-runtime.jar 内嵌在 compat-forge 里，
+//    运行时解到 <游戏目录>/.nefobric/cache 再交给核心（EcosystemAdapter.runtimeLibraries）。
+//  - devtools：开发用的扫描工具（统计真实模组用到的 Forge 接口），不进发布包。
+sourceSets {
+    runtime
+    devtools
+}
+
+configurations {
+    // 内嵌进 compat-forge、运行时和 forge-runtime.jar 一起交给游戏类加载器的库（不重定位：模组会直接用到它们）
+    forgeRuntimeLibs {
+        transitive = false
+    }
+    // 原版 1.20.1 自带的库：编译时用，运行时由游戏提供
+    minecraftProvided {
+        transitive = false
+    }
+    runtimeCompileOnly.extendsFrom forgeRuntimeLibs, minecraftProvided
+    devtoolsCompileOnly.extendsFrom forgeRuntimeLibs
+}
+
 dependencies {
     implementation project(':loader')
     implementation "com.electronwill.night-config:toml:${nightconfig_version}"
+
+    forgeRuntimeLibs "com.electronwill.night-config:core:${nightconfig_version}"
+    forgeRuntimeLibs "com.electronwill.night-config:toml:${nightconfig_version}"
+    forgeRuntimeLibs "org.apache.maven:maven-artifact:3.8.5"
+    forgeRuntimeLibs "net.jodah:typetools:0.6.3"
+
+    minecraftProvided "org.apache.logging.log4j:log4j-api:2.19.0"
+    minecraftProvided "org.slf4j:slf4j-api:2.0.1"
+    minecraftProvided "org.apache.commons:commons-lang3:3.12.0"
+    minecraftProvided "org.jetbrains:annotations:24.0.1"
+
+    runtimeCompileOnly project(':loader')
+    runtimeCompileOnly sourceSets.main.output
+
+    devtoolsImplementation "org.ow2.asm:asm:${asm_version}"
+    devtoolsImplementation "org.ow2.asm:asm-tree:${asm_version}"
+
+    testImplementation sourceSets.runtime.output
+    testRuntimeOnly "org.apache.logging.log4j:log4j-core:2.19.0"
+}
+
+configurations {
+    testImplementation.extendsFrom forgeRuntimeLibs, minecraftProvided
+}
+
+def forgeRuntimeJar = tasks.register('forgeRuntimeJar', Jar) {
+    archiveFileName = 'forge-runtime.jar'
+    destinationDirectory = layout.buildDirectory.dir('forge-runtime')
+    from sourceSets.runtime.output
+}
+
+jar {
+    // 内嵌的运行库。ForgeAdapter 按 META-INF/nefobric/forge-runtime.list 解压
+    from(forgeRuntimeJar) {
+        into 'META-INF/nefobric'
+    }
+    from(configurations.forgeRuntimeLibs) {
+        into 'META-INF/nefobric/libs'
+    }
+    def libNames = configurations.forgeRuntimeLibs
+    inputs.files(libNames)
+    from(layout.buildDirectory.dir('forge-runtime-list')) {
+        into 'META-INF/nefobric'
+    }
+    dependsOn 'forgeRuntimeList'
+}
+
+tasks.register('forgeRuntimeList') {
+    def libs = configurations.forgeRuntimeLibs
+    def out = layout.buildDirectory.file('forge-runtime-list/forge-runtime.list')
+    inputs.files(libs)
+    outputs.file(out)
+    doLast {
+        def f = out.get().asFile
+        f.parentFile.mkdirs()
+        def lines = ['forge-runtime.jar'] + libs.files.collect { 'libs/' + it.name }.sort()
+        f.text = lines.join('\n') + '\n'
+    }
+}
+
+// 给测试模组编译用：Forge API（模组 jar 里不会带这些类）
+configurations {
+    forgeApiElements {
+        canBeConsumed = true
+        canBeResolved = false
+        extendsFrom forgeRuntimeLibs, minecraftProvided
+    }
+}
+artifacts {
+    forgeApiElements(forgeRuntimeJar)
+}
+
+tasks.named('compileRuntimeJava', JavaCompile) {
+    // Forge 47 把 ModLoadingContext.get() 等标成了“将在 1.21.1 移除”，但 1.20.1 的模组都在用，实现里也得用
+    options.compilerArgs += ['-Xlint:-removal']
 }

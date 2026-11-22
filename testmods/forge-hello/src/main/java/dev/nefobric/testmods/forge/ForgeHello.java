@@ -1,12 +1,50 @@
 package dev.nefobric.testmods.forge;
 
+import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
+/**
+ * 只用 Forge 47 公开 API 的测试模组：构造函数里拿模组总线、注册配置；监听 setup 和加载完成事件。
+ * 同一个 jar 也能直接放进真正的 Forge 1.20.1 里运行。
+ */
 @Mod("forge_hello")
 public class ForgeHello {
+    private static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
+    private static final ForgeConfigSpec.ConfigValue<String> GREETING = BUILDER
+            .comment("What forge_hello says during common setup")
+            .define("greeting", "Hello from the config");
+    private static final ForgeConfigSpec.IntValue COUNT = BUILDER.defineInRange("count", 3, 1, 10);
+    private static final ForgeConfigSpec SPEC = BUILDER.build();
+
+    @SuppressWarnings("removal") // 1.20.1 的模组都这样拿上下文；Forge 只是预告了 1.21.1 会移除
     public ForgeHello() {
         ClassLoader cl = ForgeHello.class.getClassLoader();
         System.out.println("[forge_hello] constructed: Hello from Forge! / 你好，Forge！ thread="
                 + Thread.currentThread().getName() + ", loader=" + (cl == null ? "bootstrap" : cl.getName()));
+        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
+        modBus.addListener(this::commonSetup);
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC);
+    }
+
+    private void commonSetup(FMLCommonSetupEvent event) {
+        System.out.println("[forge_hello] common setup: " + GREETING.get() + " x" + COUNT.get()
+                + ", mods=" + ModList.get().size() + ", forge=" + ModList.get().isLoaded("forge"));
+        event.enqueueWork(() -> System.out.println("[forge_hello] enqueued work ran"));
+    }
+
+    @Mod.EventBusSubscriber(modid = "forge_hello", bus = Mod.EventBusSubscriber.Bus.MOD)
+    public static final class ModEvents {
+        @SubscribeEvent
+        public static void onLoadComplete(FMLLoadCompleteEvent event) {
+            System.out.println("[forge_hello] load complete");
+        }
     }
 }

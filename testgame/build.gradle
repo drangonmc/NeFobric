@@ -10,8 +10,26 @@ sourceSets {
     lib
 }
 
+// 原版 1.20.1 自带、Forge 运行时依赖的几个库（版本和原版一致）。真游戏的客户端由启动器放进 classpath，
+// 服务端在 bundler 里；假游戏照做，这样 Forge 运行时在测试里看到的环境和真游戏一样。
+configurations {
+    minecraftLibs {
+        transitive = false
+    }
+}
+
 dependencies {
     serverCompileOnly sourceSets.lib.output
+    minecraftLibs 'org.apache.logging.log4j:log4j-api:2.19.0'
+    minecraftLibs 'org.apache.logging.log4j:log4j-core:2.19.0'
+    minecraftLibs 'org.slf4j:slf4j-api:2.0.1'
+    minecraftLibs 'org.apache.commons:commons-lang3:3.12.0'
+}
+
+// 给端到端测试用：客户端 classpath 上的原版库
+tasks.register('clientLibs', Sync) {
+    from configurations.minecraftLibs
+    into layout.buildDirectory.dir('client-libs')
 }
 
 tasks.register('clientJar', Jar) {
@@ -36,7 +54,9 @@ tasks.register('libJar', Jar) {
 tasks.register('bundlerJar') {
     def serverJar = tasks.named('serverGameJar')
     def libJar = tasks.named('libJar')
+    def mcLibs = configurations.minecraftLibs
     dependsOn serverJar, libJar
+    inputs.files(mcLibs)
     def out = layout.buildDirectory.file('libs/fake-server-bundler-1.20.1.jar')
     outputs.file(out)
     doLast {
@@ -51,11 +71,17 @@ tasks.register('bundlerJar') {
             }
             put('META-INF/main-class', 'net.minecraft.server.Main'.bytes)
             put('META-INF/versions.list', "${sha(game)}\t1.20.1\t1.20.1/server-1.20.1.jar\n".bytes)
-            put('META-INF/libraries.list', "${sha(lib)}\torg.example:fake-library:1.0\torg/example/fake-library/1.0/fake-library-1.0.jar\n".bytes)
+            def libs = [[lib, 'org.example:fake-library:1.0', 'org/example/fake-library/1.0/fake-library-1.0.jar']]
+            mcLibs.resolvedConfiguration.resolvedArtifacts.sort { it.file.name }.each { a ->
+                def id = a.moduleVersion.id
+                libs << [a.file, "${id.group}:${id.name}:${id.version}",
+                         "${id.group.replace('.', '/')}/${id.name}/${id.version}/${a.file.name}"]
+            }
+            put('META-INF/libraries.list', libs.collect { "${sha(it[0])}\t${it[1]}\t${it[2]}\n" }.join('').bytes)
             put('META-INF/versions/1.20.1/server-1.20.1.jar', game.bytes)
-            put('META-INF/libraries/org/example/fake-library/1.0/fake-library-1.0.jar', lib.bytes)
+            libs.each { put("META-INF/libraries/${it[2]}", it[0].bytes) }
         }
     }
 }
 
-assemble.dependsOn 'clientJar', 'bundlerJar'
+assemble.dependsOn 'clientJar', 'bundlerJar', 'clientLibs'

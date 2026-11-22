@@ -29,6 +29,8 @@ class LaunchIT {
     private static final Path LOADER = prop("loaderJar");
     private static final Path FAKE_CLIENT = prop("fakeClientJar");
     private static final Path FAKE_SERVER = prop("fakeServerJar");
+    /** 原版自带的库（log4j、slf4j、commons-lang3）：真游戏的客户端由启动器放进 classpath。 */
+    private static final Path FAKE_CLIENT_LIBS = prop("fakeClientLibs");
     private static final List<Path> TEST_MODS = List.of(prop("fabricHelloJar"), prop("forgeHelloJar"),
             prop("neoforgeHelloJar"));
     private static final Path FABRIC_JIJ = prop("fabricJijJar");
@@ -74,6 +76,26 @@ class LaunchIT {
         return cmd;
     }
 
+    /**
+     * forge_hello 只用 Forge 公开 API：模组总线上的 setup 事件、enqueueWork、@EventBusSubscriber、ForgeConfigSpec。
+     * 配置文件第一次加载时按规格补全并写回。
+     */
+    private static void assertForgeLifecycle(Run r) {
+        r.assertInOrder(
+                "[forge_hello] constructed",
+                "[forge_hello] common setup: Hello from the config x3, mods=4, forge=true",
+                "[forge_hello] enqueued work ran",
+                "[forge_hello] load complete");
+    }
+
+    private static String clientClasspath() throws IOException {
+        List<String> cp = new ArrayList<>(List.of(LOADER.toString(), FAKE_CLIENT.toString()));
+        try (Stream<Path> libs = Files.list(FAKE_CLIENT_LIBS)) {
+            libs.filter(p -> p.toString().endsWith(".jar")).sorted().forEach(p -> cp.add(p.toString()));
+        }
+        return String.join(File.pathSeparator, cp);
+    }
+
     private static void installTestMods(Path gameDir) throws IOException {
         Path mods = Files.createDirectories(gameDir.resolve("mods"));
         for (Path m : TEST_MODS) {
@@ -96,7 +118,7 @@ class LaunchIT {
         writeJar(gameDir.resolve("mods/some-library.jar"), "org/example/Lib.txt", "not a mod");
         writeJar(gameDir.resolve("mods/quilt-thing.jar"), "quilt.mod.json", "{}");
 
-        List<String> cmd = java("-cp", LOADER + File.pathSeparator + FAKE_CLIENT,
+        List<String> cmd = java("-cp", clientClasspath(),
                 "dev.nefobric.loader.launch.ClientMain", "--username", "Tester", "--gameDir", gameDir.toString(),
                 "--version", "nefobric-test");
         Run r = run(gameDir, cmd);
@@ -127,6 +149,7 @@ class LaunchIT {
         assertFalse(r.output().contains("server entrypoint ran"), r.output());
         // 游戏对象在客户端入口运行之前就交给了 FabricLoader.getGameInstance()
         assertTrue(r.output().contains("client entrypoint ran, game=net.minecraft.client.FakeMinecraft"), r.output());
+        assertForgeLifecycle(r);
         // Fabric Loader 公开 API 的运行时检查（见 fabric-hello 的 ApiProbe）
         assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(r.output().contains("Skipped quilt-thing.jar: Quilt mods are not supported yet."), r.output());
@@ -144,7 +167,7 @@ class LaunchIT {
         assertEquals(0, r.exitCode(), r.output());
         r.assertInOrder(
                 "NeFobric 0.0.1-alpha is starting Minecraft 1.20.1 (dedicated server)",
-                "Extracted 2 file(s) from server.jar",
+                "Extracted 6 file(s) from server.jar",
                 "Mixin 0.8.7 ready: 2 configs from 2 mods",
                 "[fabric_hello] preLaunch",
                 "Installed the game hook in net.minecraft.server.Main",
@@ -158,6 +181,7 @@ class LaunchIT {
                 "[forge_hello] mixin: server main returning");
         assertTrue(r.output().contains("env=SERVER"), r.output());
         assertFalse(r.output().contains("client entrypoint ran"), r.output());
+        assertForgeLifecycle(r);
         assertFalse(r.output().contains("FakeMinecraft"), "client mixins must not apply on the server: " + r.output());
         assertTrue(r.output().contains("[fabric_hello] api: OK"), r.output());
         assertTrue(Files.isRegularFile(serverDir.resolve("versions/1.20.1/server-1.20.1.jar")));
@@ -188,7 +212,7 @@ class LaunchIT {
                 versionRange="[1.19.2,1.19.3)"
                 """);
 
-        List<String> cmd = java("-cp", LOADER + File.pathSeparator + FAKE_CLIENT,
+        List<String> cmd = java("-cp", clientClasspath(),
                 "dev.nefobric.loader.launch.ClientMain", "--gameDir", gameDir.toString());
         Run r = run(gameDir, cmd);
 
@@ -212,7 +236,7 @@ class LaunchIT {
                 {"schemaVersion": 1, "id": "broken_mod", "version": "0.1.0",
                  "entrypoints": {"main": ["com.example.DoesNotExist"]}}
                 """);
-        List<String> cmd = java("-cp", LOADER + File.pathSeparator + FAKE_CLIENT,
+        List<String> cmd = java("-cp", clientClasspath(),
                 "dev.nefobric.loader.launch.ClientMain", "--gameDir", gameDir.toString());
         Run r = run(gameDir, cmd);
 
