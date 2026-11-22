@@ -10,8 +10,13 @@ public record VersionInfo(String forgeVersion, String mcVersion, String mcpVersi
         return mcVersion + "-" + mcpVersion;
     }
 
+    /** NeoForge 的 FML 47.2 把 FML 版本单独列出来；Forge 47 里 FML 和 Forge 同一个版本号。 */
+    public String fmlVersion() {
+        return forgeVersion;
+    }
+
     /** NeoForge 的 FML 47.2 多出来的方法。 */
     public String mcAndFmlVersion() {
-        return mcVersion + "-" + forgeVersion;
+        return mcVersion + "-" + fmlVersion();
     }
 }

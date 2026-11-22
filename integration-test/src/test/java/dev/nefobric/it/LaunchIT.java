@@ -81,8 +81,12 @@ class LaunchIT {
      * 配置文件第一次加载时按规格补全并写回。
      */
     private static void assertForgeLifecycle(Run r) {
+        boolean client = r.output().contains("(client)");
         r.assertInOrder(
                 "[forge_hello] constructed",
+                // forge-hello 的 access transformer 把模拟游戏的私有方法改成了 public；@OnlyIn(CLIENT) 的方法只在客户端保留
+                "[forge_hello] access transformer: atProbe is public",
+                "[forge_hello] @OnlyIn: clientOnly " + (client ? "present" : "stripped"),
                 "[forge_hello] common setup: Hello from the config x3, mods=4, forge=true",
                 "[forge_hello] enqueued work ran",
                 "[forge_hello] load complete");

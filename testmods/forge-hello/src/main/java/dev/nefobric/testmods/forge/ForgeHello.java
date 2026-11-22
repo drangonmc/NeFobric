@@ -1,5 +1,7 @@
 package dev.nefobric.testmods.forge;
 
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -10,6 +12,11 @@ import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 
 /**
  * 只用 Forge 47 公开 API 的测试模组：构造函数里拿模组总线、注册配置；监听 setup 和加载完成事件。
@@ -32,6 +39,26 @@ public class ForgeHello {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         modBus.addListener(this::commonSetup);
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, SPEC);
+        probeTransformers();
+    }
+
+    /** 检查 access transformer 和 @OnlyIn 剥离：在真正的 Forge 里没有模拟游戏的类，只检查 @OnlyIn。 */
+    private static void probeTransformers() {
+        String game = FMLEnvironment.dist.isClient() ? "net.minecraft.client.FakeMinecraft" : "net.minecraft.server.Main";
+        try {
+            Method probe = Class.forName(game, false, ForgeHello.class.getClassLoader()).getDeclaredMethod("atProbe");
+            System.out.println("[forge_hello] access transformer: atProbe is "
+                    + (Modifier.isPublic(probe.getModifiers()) ? "public" : "private"));
+        } catch (ReflectiveOperationException e) {
+            // 不是模拟游戏
+        }
+        boolean present = Arrays.stream(ForgeHello.class.getDeclaredMethods()).anyMatch(m -> m.getName().equals("clientOnly"));
+        System.out.println("[forge_hello] @OnlyIn: clientOnly " + (present ? "present" : "stripped"));
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    private static String clientOnly() {
+        return "client";
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

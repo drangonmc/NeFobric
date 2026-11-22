@@ -1,5 +1,9 @@
 package dev.nefobric.compat.forge;
 
+import dev.nefobric.compat.forge.transform.AccessTransformerApplier;
+import dev.nefobric.compat.forge.transform.AccessTransformers;
+import dev.nefobric.compat.forge.transform.OnlyInStripper;
+import dev.nefobric.loader.Env;
 import dev.nefobric.loader.discovery.ModJar;
 import dev.nefobric.loader.impl.NeFobricLoader;
 import dev.nefobric.loader.launch.GameInstall;
@@ -9,6 +13,8 @@ import dev.nefobric.loader.metadata.ModMetadataException;
 import dev.nefobric.loader.spi.EcosystemAdapter;
 import dev.nefobric.loader.spi.LoadStage;
 import dev.nefobric.loader.spi.ModLoadingException;
+import dev.nefobric.loader.transform.TransformerPhase;
+import dev.nefobric.loader.transform.TransformerRegistry;
 import dev.nefobric.loader.util.Log;
 import dev.nefobric.loader.util.Messages;
 
@@ -19,8 +25,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
@@ -139,10 +148,50 @@ public final class ForgeAdapter implements EcosystemAdapter {
                 && mod.extra(ModsTomlParser.EXTRA_MOD_CLASS, String.class) == null) {
             out.add(Messages.tr("forge.noModClass", mod.describe(), mod.id()));
         }
-        if (!mod.accessTransformers().isEmpty()) {
-            out.add(Messages.tr("forge.atIgnored", mod.describe()));
-        }
         return out;
+    }
+
+    /**
+     * STRIP 阶段按端去掉 {@code @OnlyIn}，ACCESS 阶段应用所有 Forge 系模组（含 Jar-in-Jar 里的）的访问变换。
+     * 和 Forge 一样对游戏和模组的类都生效。
+     */
+    @Override
+    public void registerTransformers(TransformerRegistry registry, NeFobricLoader loader, List<ModCandidate> mods) {
+        if (mods.isEmpty()) {
+            return;
+        }
+        registry.add(TransformerPhase.STRIP, new OnlyInStripper(loader.env() == Env.CLIENT ? "CLIENT" : "DEDICATED_SERVER"));
+        accessTransformers(mods).ifPresent(at -> registry.add(TransformerPhase.ACCESS, new AccessTransformerApplier(at)));
+    }
+
+    /** 读出并合并这些模组的 {@code META-INF/accesstransformer.cfg}；一条都没有时返回空。 */
+    public static Optional<AccessTransformers> accessTransformers(List<ModCandidate> mods) {
+        AccessTransformers.Builder builder = AccessTransformers.builder();
+        Set<Path> seen = new HashSet<>();
+        int files = 0;
+        for (ModCandidate mod : mods) {
+            if (mod.accessTransformers().isEmpty() || mod.origin() == null || !seen.add(mod.origin())) {
+                continue;
+            }
+            try (ModJar jar = ModJar.open(mod.origin())) {
+                for (String path : mod.accessTransformers()) {
+                    Optional<String> text = jar.readString(path);
+                    if (text.isPresent()) {
+                        builder.parse(text.get(), mod.id());
+                        files++;
+                    }
+                }
+            } catch (IOException e) {
+                Log.warn(Messages.tr("forge.atUnreadable", mod.describe(), e.toString()));
+            }
+        }
+        builder.problems().forEach(p -> Log.warn(Messages.tr("forge.atBadLine", p)));
+        AccessTransformers at = builder.build();
+        if (at.isEmpty()) {
+            return Optional.empty();
+        }
+        Log.debug("Forge access transformers: " + at.entryCount() + " entries from " + files + " file(s)");
+        return Optional.of(at);
     }
 
     /**

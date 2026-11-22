@@ -56,7 +56,8 @@ tasks.register('bundlerJar') {
     def libJar = tasks.named('libJar')
     def mcLibs = configurations.minecraftLibs
     dependsOn serverJar, libJar
-    inputs.files(mcLibs)
+    // 服务端游戏 jar 和库变了也要重新打包
+    inputs.files(serverJar, libJar, mcLibs)
     def out = layout.buildDirectory.file('libs/fake-server-bundler-1.20.1.jar')
     outputs.file(out)
     doLast {

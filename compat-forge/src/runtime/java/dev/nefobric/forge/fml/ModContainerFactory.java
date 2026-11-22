@@ -5,6 +5,8 @@ import net.minecraftforge.fml.ModLoadingException;
 import net.minecraftforge.fml.ModLoadingStage;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLanguageProvider;
 import net.minecraftforge.fml.loading.FMLLoader;
+import net.minecraftforge.fml.lowcodemod.LowCodeModContainer;
+import net.minecraftforge.fml.mclanguageprovider.MinecraftModContainer;
 import net.minecraftforge.fml.loading.moddiscovery.ModFileInfo;
 import net.minecraftforge.forgespi.language.IModInfo;
 import net.minecraftforge.forgespi.language.IModLanguageProvider;
@@ -27,14 +29,15 @@ public final class ModContainerFactory {
     public static List<ModContainer> build(ModFileInfo file, List<ModLoadingException> errors) {
         List<ModContainer> out = new ArrayList<>();
         if (ForgeEnvironment.isBuiltinFile(file)) {
-            file.getMods().forEach(m -> out.add(new BuiltinModContainer(m)));
+            file.getMods().forEach(m -> out.add("minecraft".equals(m.getModId()) ? new MinecraftModContainer(m)
+                    : new BuiltinModContainer(m)));
             return out;
         }
         ModFileScanData scan = file.getFile().getScanResult();
         String language = file.requiredLanguageLoaders().isEmpty() ? "javafml"
                 : file.requiredLanguageLoaders().get(0).languageName();
         if ("lowcodefml".equals(language)) {
-            file.getMods().forEach(m -> out.add(new LowCodeModContainer(m)));
+            file.getMods().forEach(m -> out.add(new LowCodeModContainer(m, scan, FMLLoader.getGameLayer())));
             return out;
         }
         JAVAFML.getFileVisitor().accept(scan);
@@ -45,7 +48,7 @@ public final class ModContainerFactory {
                 // Forge 会因此拒绝整个文件；NeFobric 给一个没有主类的容器，让同一 jar 里的其他模组照常加载
                 LOGGER.warn("Mod {} in {} has no @Mod class; loading it without one", info.getModId(),
                         file.getFile().getFileName());
-                out.add(new LowCodeModContainer(info));
+                out.add(new LowCodeModContainer(info, scan, FMLLoader.getGameLayer()));
                 continue;
             }
             try {
